@@ -1,22 +1,5 @@
-# Core data handling
-pandas>=2.2,<3
-numpy>=1.26,<3
-openpyxl>=3.1,<4
-pyarrow>=16,<20
-
-# Dashboard
-streamlit>=1.37,<2
-
-# Charts and visualizations
-plotly>=5.22,<6
-altair>=5.3,<6
-matplotlib>=3.8,<4
-seaborn>=0.13,<1
-
-# Excel export support
-XlsxWriter>=3.2,<4
-
-# Optional but useful
-python-dateutil>=2.9
-pytz>=2024.1
-watchdog>=4.0
+streamlit
+pandas
+numpy
+plotly
+openpyxl
