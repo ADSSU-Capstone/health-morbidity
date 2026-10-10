@@ -1,27 +1,3 @@
-# ==============================================================
-# fhisis_cleaning.py
-# Data cleaning / transformation layer
-# FHSIS Morbidity Dashboard - RHU Trento
-# ==============================================================
-"""
-Cleaning rules applied to the raw FHSIS workbook
-------------------------------------------------
-1.  Emoji / pictograph removal from every text cell.
-2.  Invisible character removal (zero-width space, ZWJ, BOM, bidi marks).
-3.  Unicode NFKC normalisation (full-width digits -> half-width, etc.).
-4.  Non-breaking spaces and tabs collapsed to a single space.
-5.  Leading / trailing whitespace stripped, internal runs collapsed.
-6.  Blank, "-", "N/A", "NA", "NONE", "NULL" numeric cells -> 0.
-7.  Non-numeric text inside numeric cells -> 0 and logged.
-8.  Single-letter section markers (A, B, C ...) used as section headers.
-9.  Non-disease rows (PREPARED BY, PHN, MHO, signatures) dropped.
-10. "TOTAL" row dropped so it cannot be double-counted.
-11. Duplicate disease rows inside one sheet summed and logged.
-12. Known spelling variants / typos mapped to one canonical name.
-13. Male / Female per-age-group totals reconciled against AM / AN.
-14. Reported year reconciled against the sheet name.
-"""
-
 from __future__ import annotations
 
 import re
