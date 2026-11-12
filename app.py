@@ -1,11 +1,6 @@
-# app.py
-# FHSIS Morbidity Dashboard - RHU Trento
-# Tabs mirror the "Insights and Relationships" chapter.
-
 from __future__ import annotations
 
 from io import BytesIO
-from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -16,9 +11,19 @@ import streamlit as st
 
 from fhisis_cleaning import AGE_ORDER, build_dataset
 
-# ==================================================================
-# PAGE CONFIG + STYLES
-# ==================================================================
+try:
+    from statsmodels.tsa.arima.model import ARIMA
+    STATSMODELS_AVAILABLE = True
+except Exception:
+    STATSMODELS_AVAILABLE = False
+
+try:
+    from prophet import Prophet
+    PROPHET_AVAILABLE = True
+except Exception:
+    PROPHET_AVAILABLE = False
+
+
 st.set_page_config(
     page_title="FHSIS Morbidity Dashboard",
     page_icon=None,
@@ -76,9 +81,6 @@ STYLES = """
 st.markdown(STYLES, unsafe_allow_html=True)
 
 
-# ==================================================================
-# HELPERS
-# ==================================================================
 def kpi_card(label: str, value: str, sub: str = "") -> str:
     return f"""
     <div class="kpi-card">
@@ -98,35 +100,23 @@ def result_card(title: str, body: str) -> str:
     """
 
 
-def chi_square(observed: np.ndarray) -> tuple[float, int]:
-    observed = np.asarray(observed, dtype=float)
-    if observed.size == 0 or observed.sum() == 0:
-        return 0.0, 0
-    row = observed.sum(axis=1, keepdims=True)
-    col = observed.sum(axis=0, keepdims=True)
-    grand = observed.sum()
-    expected = row @ col / grand
-    mask = expected > 0
-    chi2 = np.nansum(((observed - expected) ** 2)[mask] / expected[mask])
-    dof = (observed.shape[0] - 1) * (observed.shape[1] - 1)
-    return float(chi2), int(dof)
+def evaluate_forecast(actual: np.ndarray, predicted: np.ndarray) -> dict:
+    actual = np.asarray(actual, dtype=float)
+    predicted = np.asarray(predicted, dtype=float)
+    n = len(actual)
+    if n == 0:
+        return {"MAE": 0.0, "MSE": 0.0, "RMSE": 0.0, "MAPE": 0.0}
+    err = actual - predicted
+    mae = float(np.mean(np.abs(err)))
+    mse = float(np.mean(err ** 2))
+    rmse = float(np.sqrt(mse))
+    nonzero = actual != 0
+    mape = float(np.mean(np.abs(err[nonzero] / actual[nonzero])) * 100) if np.any(nonzero) else 0.0
+    return {"MAE": round(mae, 3), "MSE": round(mse, 3),
+            "RMSE": round(rmse, 3), "MAPE": round(mape, 3)}
 
 
-def cramers_v(chi2: float, n: float, r: int, c: int) -> float:
-    if n <= 0 or min(r - 1, c - 1) <= 0:
-        return 0.0
-    return float(np.sqrt(chi2 / (n * min(r - 1, c - 1))))
-
-
-def v_strength(v: float) -> str:
-    if v < 0.1: return "Negligible"
-    if v < 0.2: return "Weak"
-    if v < 0.4: return "Moderate"
-    if v < 0.6: return "Strong"
-    return "Very Strong"
-
-
-def forecast_linear(series: pd.Series, steps: int = 3) -> np.ndarray:
+def descriptive_trend_forecast(series: pd.Series, steps: int = 3) -> np.ndarray:
     y = np.asarray(series, dtype=float)
     if len(y) == 0:
         return np.zeros(steps)
@@ -138,15 +128,61 @@ def forecast_linear(series: pd.Series, steps: int = 3) -> np.ndarray:
     return np.maximum(np.polyval(coeffs, future_x), 0)
 
 
+def fit_arima_forecast(series: pd.Series, steps: int = 3) -> Optional[np.ndarray]:
+    if not STATSMODELS_AVAILABLE:
+        return None
+    try:
+        model = ARIMA(series.astype(float), order=(1, 1, 1))
+        fit = model.fit()
+        fc = fit.forecast(steps=steps)
+        return np.maximum(np.asarray(fc, dtype=float), 0)
+    except Exception:
+        return None
+
+
+def fit_prophet_forecast(series: pd.Series, steps: int = 3) -> Optional[np.ndarray]:
+    if not PROPHET_AVAILABLE:
+        return None
+    try:
+        df = pd.DataFrame({
+            "ds": pd.date_range(start="2024-01-01", periods=len(series), freq="MS"),
+            "y": series.astype(float).values,
+        })
+        m = Prophet()
+        m.fit(df)
+        future = m.make_future_dataframe(periods=steps, freq="MS")
+        fc = m.predict(future)
+        vals = fc["yhat"].tail(steps).values
+        return np.maximum(np.asarray(vals, dtype=float), 0)
+    except Exception:
+        return None
+
+
+PLACEHOLDER_DISEASES = {
+    "", "TOTAL", "TOTAL MORBIDITY CASES", "PREPARED BY:", "APPROVED BY:",
+    "SECTION A.1 MORBIDITY", "OTHER DISEASES",
+    "AMELYN N. BUNGCAD, RN", "AMELYN  N.  BUNGCAD, RN",
+    "CHRISTINE JOY C. MACALAGAY, MD", "CHRISTINE JOY  C.  MACALAGAY, MD",
+    "PHN", "MHO",
+}
+PLACEHOLDER_LETTERS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+
+def clean_placeholder_rows(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty or "Disease" not in df.columns:
+        return df
+    disease = df["Disease"].astype(str).str.strip()
+    keep = ~disease.isin(PLACEHOLDER_DISEASES)
+    keep &= ~disease.str.upper().isin(PLACEHOLDER_LETTERS)
+    keep &= disease.str.len() > 1
+    return df[keep].copy()
+
+
 @st.cache_data(show_spinner=False)
-def load_clean_data(file_bytes: Optional[bytes], filename: str):
-    source = BytesIO(file_bytes) if file_bytes is not None else filename
-    return build_dataset(source)
+def load_clean_data(file_bytes: bytes, filename: str):
+    return build_dataset(BytesIO(file_bytes))
 
 
-# ==================================================================
-# HERO
-# ==================================================================
 st.markdown(
     """
     <div class="hero">
@@ -157,43 +193,38 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ==================================================================
-# DATA SOURCE
-# ==================================================================
 with st.sidebar:
     st.markdown("### Data Source")
     uploaded_file = st.file_uploader(
         "Upload FHSIS workbook",
         type=["xlsx", "xls"],
-        help="Upload the TRENTO-M2MORBIDITY workbook. If not uploaded, the app uses the default filename.",
+        help="Upload the TRENTO-M2MORBIDITY-2026.xlsx workbook to begin.",
+    )
+    st.caption(
+        "The dashboard does not auto-load a file. Please upload the FHSIS "
+        "workbook. The TRENTO-M2MORBIDITY-2026.xlsx format is supported."
     )
 
-default_path = Path("TRENTO-M2MORBIDITY-2026.xlsx")
-
-if uploaded_file is not None:
-    file_bytes = uploaded_file.getvalue()
-    filename = uploaded_file.name
-elif default_path.exists():
-    file_bytes = None
-    filename = str(default_path)
-else:
-    st.error(
-        "No workbook found. Please upload the FHSIS Excel file or place "
-        "TRENTO-M2MORBIDITY-2026.xlsx in the project folder."
+if uploaded_file is None:
+    st.info(
+        "Upload the FHSIS Excel workbook in the sidebar to load the dashboard. "
+        "No data will be loaded until a file is provided."
     )
     st.stop()
 
 with st.spinner("Processing FHSIS data..."):
-    result = load_clean_data(file_bytes, filename)
+    result = load_clean_data(uploaded_file.getvalue(), uploaded_file.name)
 
 long_df = result.long_df
-if long_df.empty:
+if long_df is None or long_df.empty:
     st.error("No morbidity records were detected. Please check the workbook format.")
     st.stop()
 
-# ==================================================================
-# FILTERS
-# ==================================================================
+long_df = clean_placeholder_rows(long_df)
+if long_df.empty:
+    st.error("Only placeholder/total rows were detected. Please check the workbook.")
+    st.stop()
+
 with st.sidebar:
     st.markdown("---")
     st.markdown("### Filters")
@@ -203,19 +234,15 @@ with st.sidebar:
         sorted(long_df["Period Type"].dropna().unique().tolist()),
         default=sorted(long_df["Period Type"].dropna().unique().tolist()),
     )
-
     period_options = sorted(long_df["Period"].dropna().unique().tolist())
     periods = st.multiselect("Period", period_options, default=period_options)
-
     disease_options = sorted(long_df["Disease"].dropna().unique().tolist())
     diseases = st.multiselect(
         "Disease", disease_options, default=[],
         help="Leave blank to include all diseases.",
     )
-
     age_options = [a for a in AGE_ORDER if a in long_df["Age Group"].astype(str).unique().tolist()]
     age_groups = st.multiselect("Age group", age_options, default=age_options)
-
     sexes = st.multiselect("Sex", ["Male", "Female"], default=["Male", "Female"])
 
 filtered = long_df.copy()
@@ -234,9 +261,6 @@ if filtered.empty:
     st.warning("No records match the current filters.")
     st.stop()
 
-# ==================================================================
-# PRE-COMPUTED METRICS
-# ==================================================================
 total_cases = int(filtered["Cases"].sum())
 unique_diseases = int(filtered["Disease"].nunique())
 male_cases = int(filtered.loc[filtered["Sex"] == "Male", "Cases"].sum())
@@ -263,34 +287,20 @@ top10_share = 0.0
 if total_cases:
     top10_share = round(disease_series.head(10).sum() / total_cases * 100, 1)
 
-# ==================================================================
-# TABS
-# ==================================================================
 (
-    tab_overview,
-    tab_age,
-    tab_sex,
-    tab_time,
-    tab_rel,
-    tab_sig,
-    tab_forecast,
-    tab_dss,
-) = st.tabs(
-    [
-        "Overview",
-        "Disease Patterns by Age Group",
-        "Disease Patterns by Sex",
-        "Disease Patterns Across Time",
-        "Relationship Between Variables",
-        "Significant Health Factors",
-        "Forecasted Trends",
-        "Decision Support",
-    ]
-)
+    tab_overview, tab_age, tab_sex, tab_time,
+    tab_rel, tab_sig, tab_forecast, tab_dss,
+) = st.tabs([
+    "Overview",
+    "Disease Patterns by Age Group",
+    "Disease Patterns by Sex",
+    "Disease Patterns Across Time",
+    "Relationship Between Variables",
+    "Significant Health Factors",
+    "Forecasted Trends",
+    "Decision Support",
+])
 
-# ==================================================================
-# 1. OVERVIEW
-# ==================================================================
 with tab_overview:
     c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
@@ -341,14 +351,11 @@ with tab_overview:
                              xaxis_title="", yaxis_title="Cases")
     st.plotly_chart(fig_period, use_container_width=True)
 
-# ==================================================================
-# 2. DISEASE PATTERNS BY AGE GROUP
-# ==================================================================
 with tab_age:
     st.markdown('<div class="section-title">Disease Patterns by Age Group</div>', unsafe_allow_html=True)
     st.caption(
-        "Identifies whether certain diseases concentrate in specific age groups, "
-        "so targeted interventions can be planned."
+        "Descriptive analytics: frequencies, counts, and proportional morbidity "
+        "by disease and age group, as specified in the methodology."
     )
 
     top_diseases_list = disease_series.head(15).index.tolist()
@@ -357,7 +364,6 @@ with tab_age:
         .groupby(["Disease", "Age Group"], observed=True)["Cases"]
         .sum().unstack(fill_value=0).reindex(columns=AGE_ORDER, fill_value=0)
     )
-
     if not matrix.empty:
         fig_heat = px.imshow(
             matrix, aspect="auto", text_auto=True,
@@ -367,57 +373,36 @@ with tab_age:
                                xaxis_title="Age Group", yaxis_title="")
         st.plotly_chart(fig_heat, use_container_width=True)
 
-    st.markdown('<div class="sub-title">Age-Concentrated Diseases</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">Proportional Morbidity by Age Group</div>', unsafe_allow_html=True)
+    age_table = age_series.reset_index()
+    age_table.columns = ["Age Group", "Cases"]
+    age_table["Proportional Morbidity (%)"] = (
+        age_table["Cases"] / total_cases * 100
+    ).round(2) if total_cases else 0.0
+    age_table["Rank"] = range(1, len(age_table) + 1)
+    st.dataframe(age_table[["Rank", "Age Group", "Cases", "Proportional Morbidity (%)"]],
+                 use_container_width=True, hide_index=True)
+
+    st.markdown('<div class="sub-title">Age Concentration of Top Diseases</div>', unsafe_allow_html=True)
     concentration = []
-    for disease in disease_series.index:
+    for disease in disease_series.head(15).index:
         sub = filtered[filtered["Disease"] == disease]
         a = sub.groupby("Age Group", observed=True)["Cases"].sum()
         if a.sum() == 0:
             continue
-        top_g = a.idxmax()
-        share = round(a.max() / a.sum() * 100, 1)
         concentration.append({
             "Disease": disease,
-            "Dominant Age Group": top_g,
-            "Cases in Age Group": int(a.max()),
+            "Most Frequent Age Group": a.idxmax(),
+            "Cases in That Group": int(a.max()),
             "Total Cases": int(a.sum()),
-            "Concentration (%)": share,
+            "Proportional Share (%)": round(a.max() / a.sum() * 100, 1),
         })
-    conc_df = pd.DataFrame(concentration).sort_values("Concentration (%)", ascending=False).head(15)
-    st.dataframe(conc_df, use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(concentration), use_container_width=True, hide_index=True)
 
-    st.markdown('<div class="sub-title">Statistical Association: Disease vs Age Group</div>', unsafe_allow_html=True)
-    obs = (
-        filtered.groupby(["Disease", "Age Group"], observed=True)["Cases"]
-        .sum().unstack(fill_value=0).values
-    )
-    chi2, dof = chi_square(obs)
-    v = cramers_v(chi2, obs.sum(), obs.shape[0], obs.shape[1])
-    st.markdown(result_card(
-        "Chi-Square Result",
-        f"Chi-square = <b>{chi2:,.2f}</b>, degrees of freedom = <b>{dof}</b>. "
-        f"Cramer's V = <b>{v:.3f}</b> — <b>{v_strength(v)}</b> association between "
-        f"disease type and age group. This indicates that disease distribution is "
-        f"{'strongly' if v >= 0.4 else 'moderately' if v >= 0.2 else 'weakly'} "
-        f"dependent on age group."
-    ), unsafe_allow_html=True)
-
-    st.markdown('<div class="sub-title">Age Group Ranking by Total Cases</div>', unsafe_allow_html=True)
-    age_table = age_series.reset_index()
-    age_table.columns = ["Age Group", "Cases"]
-    age_table["Rank"] = range(1, len(age_table) + 1)
-    age_table["Share (%)"] = (age_table["Cases"] / total_cases * 100).round(2) if total_cases else 0.0
-    st.dataframe(age_table[["Rank", "Age Group", "Cases", "Share (%)"]],
-                 use_container_width=True, hide_index=True)
-
-# ==================================================================
-# 3. DISEASE PATTERNS BY SEX
-# ==================================================================
 with tab_sex:
     st.markdown('<div class="section-title">Disease Patterns by Sex</div>', unsafe_allow_html=True)
     st.caption(
-        "Compares morbidity between males and females to detect sex-predominant "
-        "diseases that may need different prevention approaches."
+        "Descriptive analytics: proportional morbidity by disease and sex."
     )
 
     sex_pivot = (
@@ -428,15 +413,10 @@ with tab_sex:
         if col not in sex_pivot.columns:
             sex_pivot[col] = 0
     sex_pivot["Total"] = sex_pivot["Male"] + sex_pivot["Female"]
-    sex_pivot["Male Share (%)"] = (
-        sex_pivot["Male"] / sex_pivot["Total"].replace(0, np.nan) * 100
-    ).round(1)
-    sex_pivot["Female Share (%)"] = (
-        sex_pivot["Female"] / sex_pivot["Total"].replace(0, np.nan) * 100
-    ).round(1)
+    sex_pivot["Male Share (%)"] = (sex_pivot["Male"] / sex_pivot["Total"].replace(0, np.nan) * 100).round(1)
+    sex_pivot["Female Share (%)"] = (sex_pivot["Female"] / sex_pivot["Total"].replace(0, np.nan) * 100).round(1)
 
     top_sex = sex_pivot.sort_values("Total", ascending=False).head(15).reset_index()
-
     fig_sex_bar = px.bar(
         top_sex, x="Disease", y=["Male", "Female"], barmode="group",
         text_auto=True, template="plotly_white",
@@ -447,39 +427,19 @@ with tab_sex:
                               xaxis_tickangle=-40, legend_title="")
     st.plotly_chart(fig_sex_bar, use_container_width=True)
 
-    st.markdown('<div class="sub-title">Sex-Predominant Diseases</div>', unsafe_allow_html=True)
-    pred = sex_pivot.copy()
-    pred["Dominant Sex"] = np.where(pred["Male"] > pred["Female"], "Male",
-                             np.where(pred["Female"] > pred["Male"], "Female", "Balanced"))
-    pred["Imbalance (percentage points)"] = (pred["Male Share (%)"] - pred["Female Share (%)"]).abs()
+    st.markdown('<div class="sub-title">Proportional Morbidity by Sex</div>', unsafe_allow_html=True)
     pred_display = (
-        pred.reset_index()
+        sex_pivot.reset_index()
         .sort_values("Total", ascending=False)
-        .head(15)[["Disease", "Male", "Female", "Total",
-                   "Dominant Sex", "Imbalance (percentage points)"]]
+        .head(15)[["Disease", "Male", "Female", "Total", "Male Share (%)", "Female Share (%)"]]
     )
     st.dataframe(pred_display, use_container_width=True, hide_index=True)
 
-    st.markdown('<div class="sub-title">Statistical Association: Disease vs Sex</div>', unsafe_allow_html=True)
-    obs_sex = sex_pivot[["Male", "Female"]].values
-    chi2_s, dof_s = chi_square(obs_sex)
-    v_s = cramers_v(chi2_s, obs_sex.sum(), obs_sex.shape[0], obs_sex.shape[1])
-    st.markdown(result_card(
-        "Chi-Square Result",
-        f"Chi-square = <b>{chi2_s:,.2f}</b>, degrees of freedom = <b>{dof_s}</b>. "
-        f"Cramer's V = <b>{v_s:.3f}</b> — <b>{v_strength(v_s)}</b> association between "
-        f"disease type and sex. Overall case load: "
-        f"<b>{male_cases:,} male</b> vs <b>{female_cases:,} female</b>."
-    ), unsafe_allow_html=True)
-
-# ==================================================================
-# 4. DISEASE PATTERNS ACROSS TIME
-# ==================================================================
 with tab_time:
     st.markdown('<div class="section-title">Disease Patterns Across Time</div>', unsafe_allow_html=True)
     st.caption(
-        "Reveals seasonal variation, monthly changes, and periods of unusually "
-        "high or low disease occurrence."
+        "Time Series Analysis: trend, seasonal patterns, and residual variation "
+        "in monthly morbidity cases (as specified in the methodology)."
     )
 
     monthly = filtered[filtered["Period Type"] == "Monthly"]
@@ -492,6 +452,7 @@ with tab_time:
             monthly.groupby(["Period Order", "Period"], observed=True)["Cases"]
             .sum().reset_index().sort_values("Period Order")
         )
+
         fig_month = px.line(
             monthly_totals, x="Period", y="Cases", markers=True,
             template="plotly_white", color_discrete_sequence=["#0f4c81"],
@@ -512,8 +473,7 @@ with tab_time:
             markers=True, template="plotly_white",
         )
         fig_multi.update_layout(height=460, margin=dict(l=10, r=10, t=10, b=10),
-                                xaxis_title="", yaxis_title="Cases",
-                                legend_title="")
+                                xaxis_title="", yaxis_title="Cases", legend_title="")
         st.plotly_chart(fig_multi, use_container_width=True)
 
         st.markdown('<div class="sub-title">Month-over-Month Change</div>', unsafe_allow_html=True)
@@ -524,70 +484,42 @@ with tab_time:
         ).round(2)
         st.dataframe(mo, use_container_width=True, hide_index=True)
 
+        if len(monthly_totals) >= 6:
+            st.markdown('<div class="sub-title">Time-Series Decomposition</div>', unsafe_allow_html=True)
+            try:
+                from statsmodels.tsa.seasonal import seasonal_decompose
+                s = monthly_totals.set_index("Period")["Cases"].astype(float)
+                decomp = seasonal_decompose(s, model="additive", period=min(3, len(s)))
+                fig_dec = go.Figure()
+                fig_dec.add_trace(go.Scatter(x=s.index, y=decomp.trend, mode="lines", name="Trend"))
+                fig_dec.add_trace(go.Scatter(x=s.index, y=decomp.seasonal, mode="lines", name="Seasonal"))
+                fig_dec.add_trace(go.Scatter(x=s.index, y=decomp.resid, mode="markers", name="Residual"))
+                fig_dec.update_layout(height=380, template="plotly_white",
+                                      xaxis_title="", yaxis_title="Component value",
+                                      legend_title="")
+                st.plotly_chart(fig_dec, use_container_width=True)
+            except Exception:
+                st.caption("Decomposition requires at least two full periods. "
+                           "Add more monthly sheets to enable it.")
+
         if not quarterly.empty:
             q = quarterly.groupby(["Period Order", "Period"], observed=True)["Cases"].sum().reset_index().sort_values("Period Order")
             fig_q = px.bar(q, x="Period", y="Cases", text_auto=True,
-                           template="plotly_white",
-                           color="Cases", color_continuous_scale="Teal")
+                           template="plotly_white", color="Cases", color_continuous_scale="Teal")
             fig_q.update_layout(height=340, margin=dict(l=10, r=10, t=10, b=10),
-                                xaxis_title="", yaxis_title="Cases",
-                                coloraxis_showscale=False)
+                                xaxis_title="", yaxis_title="Cases", coloraxis_showscale=False)
             st.markdown('<div class="sub-title">Quarterly Aggregates</div>', unsafe_allow_html=True)
             st.plotly_chart(fig_q, use_container_width=True)
 
-# ==================================================================
-# 5. RELATIONSHIP BETWEEN VARIABLES
-# ==================================================================
 with tab_rel:
     st.markdown('<div class="section-title">Relationship Between Variables</div>', unsafe_allow_html=True)
     st.caption(
-        "Examines how disease type, age group, sex, and reporting period are "
-        "associated with the number of morbidity cases."
+        "Descriptive analysis of how disease type, age group, sex, and reporting "
+        "period co-occur in the morbidity records. Inferential tests are not "
+        "part of the thesis methodology; only descriptive cross-tabulations are used."
     )
 
-    st.markdown('<div class="sub-title">Association Strength (Cramer\'s V)</div>', unsafe_allow_html=True)
-
-    # Disease vs Age
-    obs_da = filtered.groupby(["Disease", "Age Group"], observed=True)["Cases"].sum().unstack(fill_value=0).values
-    chi2_da, dof_da = chi_square(obs_da)
-    v_da = cramers_v(chi2_da, obs_da.sum(), obs_da.shape[0], obs_da.shape[1])
-
-    # Disease vs Sex
-    obs_ds = filtered.groupby(["Disease", "Sex"], observed=True)["Cases"].sum().unstack(fill_value=0).values
-    chi2_ds, dof_ds = chi_square(obs_ds)
-    v_ds = cramers_v(chi2_ds, obs_ds.sum(), obs_ds.shape[0], obs_ds.shape[1])
-
-    # Disease vs Period
-    obs_dp = filtered.groupby(["Disease", "Period"], observed=True)["Cases"].sum().unstack(fill_value=0).values
-    chi2_dp, dof_dp = chi_square(obs_dp)
-    v_dp = cramers_v(chi2_dp, obs_dp.sum(), obs_dp.shape[0], obs_dp.shape[1])
-
-    # Age vs Sex
-    obs_as = filtered.groupby(["Age Group", "Sex"], observed=True)["Cases"].sum().unstack(fill_value=0).values
-    chi2_as, dof_as = chi_square(obs_as)
-    v_as = cramers_v(chi2_as, obs_as.sum(), obs_as.shape[0], obs_as.shape[1])
-
-    rel_table = pd.DataFrame({
-        "Variable Pair": ["Disease - Age Group", "Disease - Sex",
-                          "Disease - Reporting Period", "Age Group - Sex"],
-        "Chi-Square": [round(chi2_da, 2), round(chi2_ds, 2), round(chi2_dp, 2), round(chi2_as, 2)],
-        "Degrees of Freedom": [dof_da, dof_ds, dof_dp, dof_as],
-        "Cramer's V": [round(v_da, 3), round(v_ds, 3), round(v_dp, 3), round(v_as, 3)],
-        "Strength": [v_strength(v_da), v_strength(v_ds), v_strength(v_dp), v_strength(v_as)],
-    })
-    st.dataframe(rel_table, use_container_width=True, hide_index=True)
-
-    fig_v = px.bar(
-        rel_table, x="Cramer's V", y="Variable Pair", orientation="h",
-        text_auto=True, template="plotly_white",
-        color="Cramer's V", color_continuous_scale="Teal",
-    )
-    fig_v.update_layout(height=340, margin=dict(l=10, r=10, t=10, b=10),
-                        xaxis_title="Association Strength (Cramer's V)", yaxis_title="",
-                        coloraxis_showscale=False)
-    st.plotly_chart(fig_v, use_container_width=True)
-
-    st.markdown('<div class="sub-title">Disease x Age Group Crosstab (Top 12 Diseases)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">Disease x Age Group (Top 12 Diseases)</div>', unsafe_allow_html=True)
     top12 = disease_series.head(12).index.tolist()
     ct_da = (
         filtered[filtered["Disease"].isin(top12)]
@@ -600,7 +532,7 @@ with tab_rel:
                          xaxis_title="Age Group", yaxis_title="")
     st.plotly_chart(fig_ct, use_container_width=True)
 
-    st.markdown('<div class="sub-title">Disease x Sex Crosstab (Top 12 Diseases)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">Disease x Sex (Top 12 Diseases)</div>', unsafe_allow_html=True)
     ct_ds = (
         filtered[filtered["Disease"].isin(top12)]
         .groupby(["Disease", "Sex"], observed=True)["Cases"]
@@ -615,14 +547,12 @@ with tab_rel:
                             xaxis_title="Sex", yaxis_title="")
     st.plotly_chart(fig_ct_ds, use_container_width=True)
 
-# ==================================================================
-# 6. SIGNIFICANT HEALTH FACTORS
-# ==================================================================
 with tab_sig:
     st.markdown('<div class="section-title">Significant Health-Related Factors Affecting Morbidity</div>', unsafe_allow_html=True)
     st.caption(
         "Ranks the factors (disease, age group, sex, period) by their measured "
-        "influence on morbidity case counts, based on the cleaned dataset."
+        "concentration of cases, based on the cleaned dataset. This is descriptive "
+        "concentration, not an inferential statistic."
     )
 
     c1, c2, c3 = st.columns(3)
@@ -639,9 +569,8 @@ with tab_sig:
         st.markdown(kpi_card("Dominant Factor: Sex", dominant_sex,
                              f"{dom_sex_share}% of all cases"), unsafe_allow_html=True)
 
-    st.markdown('<div class="sub-title">Factor Ranking by Measured Impact</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">Factor Ranking by Measured Concentration</div>', unsafe_allow_html=True)
 
-    # Compute influence for each factor using normalized concentration
     def concentration_score(series):
         s = series[series > 0]
         if s.empty or s.sum() == 0:
@@ -703,14 +632,12 @@ with tab_sig:
         f"interventions."
     ), unsafe_allow_html=True)
 
-# ==================================================================
-# 7. FORECASTED MORBIDITY TRENDS
-# ==================================================================
 with tab_forecast:
     st.markdown('<div class="section-title">Forecasted Morbidity Trends</div>', unsafe_allow_html=True)
     st.caption(
-        "Projects future case counts from historical monthly data using a linear "
-        "trend model, so health authorities can anticipate increases or decreases."
+        "Projects future case counts from historical monthly data using ARIMA or "
+        "Prophet (the models named in the methodology) and evaluates the model "
+        "with MAE, MSE, RMSE, and MAPE."
     )
 
     monthly = filtered[filtered["Period Type"] == "Monthly"]
@@ -721,16 +648,82 @@ with tab_forecast:
             "Please include more monthly sheets."
         )
     else:
-        horizon = st.slider("Forecast horizon (months)", min_value=1, max_value=6, value=3)
-
         monthly_totals = (
             monthly.groupby(["Period Order", "Period"], observed=True)["Cases"]
             .sum().reset_index().sort_values("Period Order")
         )
 
-        forecast_values = forecast_linear(monthly_totals["Cases"], steps=horizon)
+        series = monthly_totals["Cases"].reset_index(drop=True)
+
+        if len(series) >= 6:
+            train = series.iloc[:-2]
+            test = series.iloc[-2:].reset_index(drop=True)
+
+            model_choice = st.selectbox(
+                "Model for evaluation",
+                options=["ARIMA", "Prophet", "Descriptive linear trend"],
+                index=0,
+            )
+
+            if model_choice == "ARIMA":
+                pred_test = fit_arima_forecast(train, steps=len(test))
+                used_model = "ARIMA(1,1,1)" if pred_test is not None else None
+            elif model_choice == "Prophet":
+                pred_test = fit_prophet_forecast(train, steps=len(test))
+                used_model = "Prophet" if pred_test is not None else None
+            else:
+                pred_test = descriptive_trend_forecast(train, steps=len(test))
+                used_model = "Descriptive linear trend"
+
+            if pred_test is None:
+                st.warning(
+                    f"{model_choice} is not available in this environment. "
+                    "Install statsmodels or prophet, or choose the descriptive "
+                    "linear trend as a fallback."
+                )
+            else:
+                metrics = evaluate_forecast(test.values, pred_test)
+                st.markdown(
+                    f'<div class="sub-title">Model Evaluation ({used_model}) — hold-out tail</div>',
+                    unsafe_allow_html=True,
+                )
+                m1, m2, m3, m4 = st.columns(4)
+                with m1:
+                    st.markdown(kpi_card("MAE", f"{metrics['MAE']:,}", "Mean Absolute Error"), unsafe_allow_html=True)
+                with m2:
+                    st.markdown(kpi_card("MSE", f"{metrics['MSE']:,}", "Mean Squared Error"), unsafe_allow_html=True)
+                with m3:
+                    st.markdown(kpi_card("RMSE", f"{metrics['RMSE']:,}", "Root Mean Squared Error"), unsafe_allow_html=True)
+                with m4:
+                    st.markdown(kpi_card("MAPE", f"{metrics['MAPE']:,}%", "Mean Absolute Percentage Error"), unsafe_allow_html=True)
+
+        horizon = st.slider("Forecast horizon (months)", min_value=1, max_value=6, value=3)
+
+        model_choice_fc = st.selectbox(
+            "Model for forecasting",
+            options=["ARIMA", "Prophet", "Descriptive linear trend"],
+            index=0,
+        )
+
+        if model_choice_fc == "ARIMA":
+            forecast_values = fit_arima_forecast(series, steps=horizon)
+            fc_label = "ARIMA(1,1,1)"
+        elif model_choice_fc == "Prophet":
+            forecast_values = fit_prophet_forecast(series, steps=horizon)
+            fc_label = "Prophet"
+        else:
+            forecast_values = descriptive_trend_forecast(series, steps=horizon)
+            fc_label = "Descriptive linear trend"
+
+        if forecast_values is None:
+            st.warning(
+                f"{model_choice_fc} is not available in this environment. "
+                "Falling back to the descriptive linear trend for visualization."
+            )
+            forecast_values = descriptive_trend_forecast(series, steps=horizon)
+            fc_label = "Descriptive linear trend (fallback)"
+
         last_order = int(monthly_totals["Period Order"].max())
-        future_orders = list(range(last_order + 1, last_order + 1 + horizon))
         future_labels = [f"Forecast {i}" for i in range(1, horizon + 1)]
 
         hist_df = pd.DataFrame({
@@ -741,14 +734,17 @@ with tab_forecast:
         fc_df = pd.DataFrame({
             "Period": future_labels,
             "Cases": forecast_values.round(0).astype(int),
-            "Type": "Forecast",
+            "Type": f"Forecast ({fc_label})",
         })
         combined = pd.concat([hist_df, fc_df], ignore_index=True)
 
         fig_fc = px.line(
             combined, x="Period", y="Cases", color="Type", markers=True,
             template="plotly_white",
-            color_discrete_map={"Historical": "#0f4c81", "Forecast": "#e76f51"},
+            color_discrete_map={
+                "Historical": "#0f4c81",
+                f"Forecast ({fc_label})": "#e76f51",
+            },
         )
         fig_fc.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10),
                              xaxis_title="", yaxis_title="Cases", legend_title="")
@@ -769,7 +765,14 @@ with tab_forecast:
             )
             if len(dseries) < 3:
                 continue
-            vals = forecast_linear(dseries, steps=horizon)
+            if fc_label.startswith("ARIMA"):
+                vals = fit_arima_forecast(dseries, steps=horizon)
+            elif fc_label.startswith("Prophet"):
+                vals = fit_prophet_forecast(dseries, steps=horizon)
+            else:
+                vals = descriptive_trend_forecast(dseries, steps=horizon)
+            if vals is None:
+                vals = descriptive_trend_forecast(dseries, steps=horizon)
             hist_total = int(dseries.iloc[-1]) if len(dseries) else 0
             fc_rows.append({
                 "Disease": disease,
@@ -788,15 +791,13 @@ with tab_forecast:
 
         st.markdown(result_card(
             "Forecast Interpretation",
-            f"Based on the linear trend of the last {len(monthly_totals)} months, "
-            f"the total monthly caseload is expected to <b>{direction}</b> over the "
-            f"next {horizon} month(s), moving from <b>{total_hist_last:,}</b> cases "
-            f"to approximately <b>{total_fc_end:,}</b> cases."
+            f"Using <b>{fc_label}</b> on the last {len(monthly_totals)} months of "
+            f"monthly data, the total monthly caseload is expected to "
+            f"<b>{direction}</b> over the next {horizon} month(s), moving from "
+            f"<b>{total_hist_last:,}</b> cases to approximately "
+            f"<b>{total_fc_end:,}</b> cases."
         ), unsafe_allow_html=True)
 
-# ==================================================================
-# 8. DECISION SUPPORT
-# ==================================================================
 with tab_dss:
     st.markdown('<div class="section-title">Health Information Dashboard and Decision Support</div>', unsafe_allow_html=True)
     st.caption(
