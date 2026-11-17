@@ -279,8 +279,6 @@ with st.sidebar:
         if selected_sources:
             long_df = long_df[long_df["Source File"].isin(selected_sources)]
 
-    # Removed 'Period type' filter to focus only on Yearly data as requested.
-    
     period_options = sorted(long_df["Period"].dropna().unique().tolist())
     periods = st.multiselect("Period", period_options, default=period_options)
     disease_options = sorted(long_df["Disease"].dropna().unique().tolist())
@@ -445,13 +443,24 @@ with tab_overview:
                 [1, PALETTE["purple"]],
             ],
         )
+        
+        # FIX: Format the text on the bars to show exact numbers with commas (e.g., 10,092)
+        fig_period.update_traces(
+            texttemplate='%{y:,.0f}', 
+            textposition='outside'
+        )
+        
         fig_period.update_layout(
             height=340,
-            margin=dict(l=10, r=10, t=10, b=10),
+            margin=dict(l=10, r=10, t=30, b=10), # Added top margin for text
             xaxis_title="Year",
             yaxis_title="Cases",
             coloraxis_showscale=False, # Hide color scale since it's just one bar per year
         )
+        
+        # FIX: Ensure the X-axis shows the year nicely and doesn't abbreviate it
+        fig_period.update_xaxes(type='category')
+        
         st.plotly_chart(fig_period, use_container_width=True)
     # --- END OF FIXED SECTION ---
 
