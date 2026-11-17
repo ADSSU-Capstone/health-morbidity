@@ -279,11 +279,8 @@ with st.sidebar:
         if selected_sources:
             long_df = long_df[long_df["Source File"].isin(selected_sources)]
 
-    period_types = st.multiselect(
-        "Period type",
-        sorted(long_df["Period Type"].dropna().unique().tolist()),
-        default=sorted(long_df["Period Type"].dropna().unique().tolist()),
-    )
+    # Removed 'Period type' filter to focus only on Yearly data as requested.
+    
     period_options = sorted(long_df["Period"].dropna().unique().tolist())
     periods = st.multiselect("Period", period_options, default=period_options)
     disease_options = sorted(long_df["Disease"].dropna().unique().tolist())
@@ -298,8 +295,6 @@ with st.sidebar:
     sexes = st.multiselect("Sex", ["Male", "Female"], default=["Male", "Female"])
 
 filtered = long_df.copy()
-if period_types:
-    filtered = filtered[filtered["Period Type"].isin(period_types)]
 if periods:
     filtered = filtered[filtered["Period"].isin(periods)]
 if diseases:
@@ -420,18 +415,18 @@ with tab_overview:
         )
         st.plotly_chart(fig_age, use_container_width=True)
 
-    # --- FIXED SECTION: CASES BY YEAR ---
-    st.markdown('<div class="section-title">Cases by Year</div>', unsafe_allow_html=True)
+    # --- FIXED SECTION: CASES BY YEAR ONLY (No Monthly/Quarterly) ---
+    st.markdown('<div class="section-title">Cases by Year (2024-2026)</div>', unsafe_allow_html=True)
     
-    # Ensure we have a Year column, drop rows without a year
+    # Drop rows without a year
     year_df = filtered.dropna(subset=["Year"])
     
     if year_df.empty:
         st.warning("No year information found in the uploaded file names. Please ensure filenames contain a 4-digit year (e.g., 2024).")
     else:
-        # Group by Year and Period Type, sort chronologically
+        # Group ONLY by Year, sort chronologically
         by_year = (
-            year_df.groupby(["Year", "Period Type"], observed=True)["Cases"]
+            year_df.groupby("Year", observed=True)["Cases"]
             .sum()
             .reset_index()
             .sort_values("Year")
@@ -441,18 +436,21 @@ with tab_overview:
             by_year,
             x="Year",
             y="Cases",
-            color="Period Type",
             text_auto=True,
             template="plotly_white",
-            color_discrete_sequence=[PALETTE["purple"], PALETTE["yellow"], PALETTE["purple_light"]],
+            color="Cases",
+            color_continuous_scale=[
+                [0, PALETTE["yellow_light"]],
+                [0.5, PALETTE["yellow"]],
+                [1, PALETTE["purple"]],
+            ],
         )
         fig_period.update_layout(
             height=340,
             margin=dict(l=10, r=10, t=10, b=10),
             xaxis_title="Year",
             yaxis_title="Cases",
-            barmode="group",  # Puts periods side-by-side for each year
-            legend_title="Period Type",
+            coloraxis_showscale=False, # Hide color scale since it's just one bar per year
         )
         st.plotly_chart(fig_period, use_container_width=True)
     # --- END OF FIXED SECTION ---
