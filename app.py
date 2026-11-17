@@ -338,7 +338,6 @@ top10_share = round(disease_series.head(10).sum() / total_cases * 100, 1) if tot
     tab_sex,
     tab_time,
     tab_rel,
-    tab_sig,
     tab_forecast,
     tab_dss,
 ) = st.tabs([
@@ -347,7 +346,6 @@ top10_share = round(disease_series.head(10).sum() / total_cases * 100, 1) if tot
     "Disease Patterns by Sex",
     "Disease Patterns Across Time",
     "Relationship Between Variables",
-    "Significant Health Factors",
     "Forecasted Trends",
     "Decision Support",
 ])
@@ -747,107 +745,6 @@ with tab_rel:
         'the FHSIS workbook do not contain a barangay field. If barangay-level '
         'records are later obtained, a cluster or density view can be added here '
         'without changing the rest of the dashboard.</div>',
-        unsafe_allow_html=True,
-    )
-
-
-with tab_sig:
-    st.markdown('<div class="section-title">Significant Health-Related Factors Affecting Morbidity</div>', unsafe_allow_html=True)
-    st.caption(
-        "Descriptive ranking of the factors (disease, age group, sex, period) by "
-        "their measured contribution to morbidity case counts. No inferential "
-        "tests are applied, in line with the methodology."
-    )
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown(
-            kpi_card("Dominant Factor: Disease", top_disease, f"{top_disease_share}% of all cases"),
-            unsafe_allow_html=True,
-        )
-    with c2:
-        st.markdown(
-            kpi_card("Dominant Factor: Age", top_age, f"{top_age_share}% of all cases"),
-            unsafe_allow_html=True,
-        )
-    with c3:
-        dominant_sex = "Male" if male_cases >= female_cases else "Female"
-        dom_sex_val = max(male_cases, female_cases)
-        dom_sex_share = round(dom_sex_val / total_cases * 100, 1) if total_cases else 0.0
-        st.markdown(
-            kpi_card("Dominant Factor: Sex", dominant_sex, f"{dom_sex_share}% of all cases"),
-            unsafe_allow_html=True,
-        )
-
-    st.markdown('<div class="sub-title">Factor Ranking by Proportional Contribution</div>', unsafe_allow_html=True)
-
-    def concentration_score(series):
-        s = series[series > 0]
-        if s.empty or s.sum() == 0:
-            return 0.0
-        return float(s.max() / s.sum())
-
-    factor_rows = [
-        {
-            "Factor": "Disease Type",
-            "Highest Category": top_disease,
-            "Cases": top_disease_cases,
-            "Proportional Contribution (%)": round(concentration_score(disease_series) * 100, 1),
-        },
-        {
-            "Factor": "Age Group",
-            "Highest Category": top_age,
-            "Cases": top_age_cases,
-            "Proportional Contribution (%)": round(concentration_score(age_series) * 100, 1),
-        },
-        {
-            "Factor": "Sex",
-            "Highest Category": dominant_sex,
-            "Cases": dom_sex_val,
-            "Proportional Contribution (%)": round(dom_sex_val / total_cases * 100, 1) if total_cases else 0.0,
-        },
-        {
-            "Factor": "Reporting Period",
-            "Highest Category": str(peak_period),
-            "Cases": peak_period_cases,
-            "Proportional Contribution (%)": round(peak_period_cases / total_cases * 100, 1) if total_cases else 0.0,
-        },
-    ]
-    factors_df = pd.DataFrame(factor_rows).sort_values("Proportional Contribution (%)", ascending=False)
-    st.dataframe(factors_df, use_container_width=True, hide_index=True)
-
-    fig_fac = px.bar(
-        factors_df, x="Proportional Contribution (%)", y="Factor", orientation="h",
-        text_auto=True, template="plotly_white",
-        color="Proportional Contribution (%)",
-        color_continuous_scale=[
-            [0, PALETTE["yellow_light"]],
-            [0.5, PALETTE["yellow"]],
-            [1, PALETTE["purple"]],
-        ],
-    )
-    fig_fac.update_layout(
-        height=320, margin=dict(l=10, r=10, t=10, b=10),
-        xaxis_title="Proportional Contribution (%)", yaxis_title="",
-        coloraxis_showscale=False,
-    )
-    st.plotly_chart(fig_fac, use_container_width=True)
-
-    st.markdown('<div class="sub-title">Top Diseases Driving Case Load</div>', unsafe_allow_html=True)
-    drivers = disease_series.head(10).reset_index()
-    drivers.columns = ["Disease", "Cases"]
-    drivers["Cumulative Cases"] = drivers["Cases"].cumsum()
-    drivers["Cumulative Share (%)"] = (drivers["Cumulative Cases"] / total_cases * 100).round(2)
-    st.dataframe(drivers, use_container_width=True, hide_index=True)
-
-    st.markdown(
-        result_card(
-            "Interpretation",
-            f"The top 10 diseases account for <b>{top10_share}%</b> of all cases. "
-            f"Disease type is the largest contributor, followed by age group and "
-            f"reporting period. These factors should drive the design of local "
-            f"health interventions.",
-        ),
         unsafe_allow_html=True,
     )
 
