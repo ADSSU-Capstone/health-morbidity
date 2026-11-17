@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 from typing import Optional
+import re
 
 import numpy as np
 import pandas as pd
@@ -107,6 +108,14 @@ def result_card(title: str, body: str) -> str:
         <p>{body}</p>
     </div>
     """
+
+
+def extract_year(period_str) -> Optional[str]:
+    """Extract a 4-digit year (e.g., 2024) from a period string."""
+    if pd.isna(period_str):
+        return None
+    match = re.search(r'\b(20\d{2})\b', str(period_str))
+    return match.group(1) if match else None
 
 
 def evaluate_forecast(actual: np.ndarray, predicted: np.ndarray) -> dict:
@@ -411,18 +420,45 @@ with tab_overview:
         )
         st.plotly_chart(fig_age, use_container_width=True)
 
-    st.markdown('<div class="section-title">Cases by Period Type</div>', unsafe_allow_html=True)
-    by_period = filtered.groupby("Period Type", observed=True)["Cases"].sum().reset_index()
-    fig_period = px.bar(
-        by_period, x="Period Type", y="Cases", color="Period Type",
-        text_auto=True, template="plotly_white",
-        color_discrete_sequence=[PALETTE["purple"], PALETTE["yellow"]],
-    )
-    fig_period.update_layout(
-        showlegend=False, height=340, margin=dict(l=10, r=10, t=10, b=10),
-        xaxis_title="", yaxis_title="Cases",
-    )
-    st.plotly_chart(fig_period, use_container_width=True)
+    # --- FIXED SECTION: CASES BY YEAR ---
+    st.markdown('<div class="section-title">Cases by Year</div>', unsafe_allow_html=True)
+    
+    # Extract year from Period column
+    filtered["Year"] = filtered["Period"].apply(extract_year)
+    
+    # Drop rows without a year (to satisfy "hindi pwede na wlang year ma")
+    year_df = filtered.dropna(subset=["Year"])
+    
+    if year_df.empty:
+        st.warning("No year information found in the 'Period' column. Cannot display yearly trends.")
+    else:
+        # Group by Year and Period Type, sort chronologically
+        by_year = (
+            year_df.groupby(["Year", "Period Type"], observed=True)["Cases"]
+            .sum()
+            .reset_index()
+            .sort_values("Year")
+        )
+        
+        fig_period = px.bar(
+            by_year,
+            x="Year",
+            y="Cases",
+            color="Period Type",
+            text_auto=True,
+            template="plotly_white",
+            color_discrete_sequence=[PALETTE["purple"], PALETTE["yellow"], PALETTE["purple_light"]],
+        )
+        fig_period.update_layout(
+            height=340,
+            margin=dict(l=10, r=10, t=10, b=10),
+            xaxis_title="Year",
+            yaxis_title="Cases",
+            barmode="group",  # Puts periods side-by-side for each year
+            legend_title="Period Type",
+        )
+        st.plotly_chart(fig_period, use_container_width=True)
+    # --- END OF FIXED SECTION ---
 
 
 with tab_age:
@@ -1049,4 +1085,4 @@ with tab_dss:
         priority_disease.to_csv(index=False).encode("utf-8"),
         "decision_support_priority_diseases.csv",
         "text/csv",
-        )
+    )
