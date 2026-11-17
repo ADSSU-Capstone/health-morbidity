@@ -110,14 +110,6 @@ def result_card(title: str, body: str) -> str:
     """
 
 
-def extract_year(period_str) -> Optional[str]:
-    """Extract a 4-digit year (e.g., 2024) from a period string."""
-    if pd.isna(period_str):
-        return None
-    match = re.search(r'\b(20\d{2})\b', str(period_str))
-    return match.group(1) if match else None
-
-
 def evaluate_forecast(actual: np.ndarray, predicted: np.ndarray) -> dict:
     """MAE, MSE, RMSE, MAPE — metrics specified in the methodology."""
     actual = np.asarray(actual, dtype=float)
@@ -214,6 +206,14 @@ def load_clean_data(file_bytes_list: tuple, filenames: tuple):
         if df is not None and not df.empty:
             df = df.copy()
             df["Source File"] = name
+            
+            # Extract Year directly from filename
+            year_match = re.search(r'20\d{2}', name)
+            if year_match:
+                df["Year"] = year_match.group(0)
+            else:
+                df["Year"] = None
+                
             frames.append(df)
     if not frames:
         return pd.DataFrame()
@@ -423,14 +423,11 @@ with tab_overview:
     # --- FIXED SECTION: CASES BY YEAR ---
     st.markdown('<div class="section-title">Cases by Year</div>', unsafe_allow_html=True)
     
-    # Extract year from Period column
-    filtered["Year"] = filtered["Period"].apply(extract_year)
-    
-    # Drop rows without a year (to satisfy "hindi pwede na wlang year ma")
+    # Ensure we have a Year column, drop rows without a year
     year_df = filtered.dropna(subset=["Year"])
     
     if year_df.empty:
-        st.warning("No year information found in the 'Period' column. Cannot display yearly trends.")
+        st.warning("No year information found in the uploaded file names. Please ensure filenames contain a 4-digit year (e.g., 2024).")
     else:
         # Group by Year and Period Type, sort chronologically
         by_year = (
