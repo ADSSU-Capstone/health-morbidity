@@ -258,7 +258,6 @@ if filtered.empty:
     st.warning("No records match the current filters.")
     st.stop()
 
-# Ensure Year is treated correctly
 filtered = filtered.dropna(subset=["Year"])
 
 total_cases = int(filtered["Cases"].sum())
@@ -309,19 +308,27 @@ with tab_overview:
     with c4: st.markdown(kpi_card("Top Age Group", top_age, f"{top_age_cases:,} cases"), unsafe_allow_html=True)
     with c5: st.markdown(kpi_card("Peak Period", str(peak_period), f"{peak_period_cases:,} cases"), unsafe_allow_html=True)
 
-    st.markdown('<div class="section-title">Top 10 Diseases by Caseload</div>', unsafe_allow_html=True)
-    top10 = disease_series.head(10).sort_values().reset_index()
-    top10.columns = ["Disease", "Cases"]
-    fig_top10 = px.bar(top10, x="Cases", y="Disease", orientation="h", text_auto=True, template="plotly_white", color="Cases", color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]])
-    fig_top10.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Cases", yaxis_title="", coloraxis_showscale=False)
+    st.markdown('<div class="section-title">Top 10 Diseases by Caseload (By Year)</div>', unsafe_allow_html=True)
+    top10_year = filtered[filtered["Disease"].isin(disease_series.head(10).index)].groupby(["Disease", "Year"], observed=True)["Cases"].sum().reset_index()
+    top10_year = top10_year.sort_values(by=["Year", "Cases"], ascending=[True, False])
+    
+    fig_top10 = px.bar(
+        top10_year, x="Cases", y="Disease", color="Year", orientation="h", 
+        barmode="group", text_auto=True, template="plotly_white",
+        color_discrete_sequence=[PALETTE["purple"], PALETTE["yellow"], PALETTE["purple_light"]]
+    )
+    fig_top10.update_layout(height=450, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Cases", yaxis_title="", legend_title="Year")
     st.plotly_chart(fig_top10, use_container_width=True)
 
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown('<div class="section-title">Sex Distribution</div>', unsafe_allow_html=True)
-        sex_df = filtered.groupby("Sex", observed=True)["Cases"].sum().reset_index()
-        fig_sex = px.pie(sex_df, names="Sex", values="Cases", hole=0.45, template="plotly_white", color_discrete_sequence=[PALETTE["purple"], PALETTE["yellow"]])
-        fig_sex.update_layout(height=380, margin=dict(l=10, r=10, t=10, b=10))
+        st.markdown('<div class="section-title">Sex Distribution (By Year)</div>', unsafe_allow_html=True)
+        sex_df = filtered.groupby(["Sex", "Year"], observed=True)["Cases"].sum().reset_index()
+        fig_sex = px.bar(
+            sex_df, x="Sex", y="Cases", color="Year", barmode="group", text_auto=True, 
+            template="plotly_white", color_discrete_sequence=[PALETTE["purple"], PALETTE["yellow"], PALETTE["purple_light"]]
+        )
+        fig_sex.update_layout(height=380, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="", yaxis_title="Cases", legend_title="Year")
         st.plotly_chart(fig_sex, use_container_width=True)
         
     with col2:
@@ -342,67 +349,79 @@ with tab_overview:
 
     st.markdown('<div class="section-title">Total Cases by Year (2024-2026)</div>', unsafe_allow_html=True)
     year_df = filtered.dropna(subset=["Year"])
-    
-    if year_df.empty:
-        st.warning("No year information found in the uploaded file names. Please ensure filenames contain a 4-digit year (e.g., 2024).")
-    else:
+    if not year_df.empty:
         by_year = year_df.groupby("Year", observed=True)["Cases"].sum().reset_index().sort_values("Year")
-        
         fig_period = px.bar(
             by_year, x="Year", y="Cases", text_auto=True, template="plotly_white", color="Cases",
             color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]]
         )
         fig_period.update_traces(texttemplate='%{y:,.0f}', textposition='outside')
-        fig_period.update_layout(
-            height=340, margin=dict(l=10, r=10, t=30, b=10),
-            xaxis_title="Year", yaxis_title="Cases", coloraxis_showscale=False
-        )
+        fig_period.update_layout(height=340, margin=dict(l=10, r=10, t=30, b=10), xaxis_title="Year", yaxis_title="Cases", coloraxis_showscale=False)
         fig_period.update_xaxes(type='category')
         st.plotly_chart(fig_period, use_container_width=True)
 
 
 with tab_age:
-    st.markdown('<div class="section-title">Disease Patterns by Age Group</div>', unsafe_allow_html=True)
-    st.caption("Descriptive analytics: frequencies, counts, and proportional morbidity by disease and age group.")
+    st.markdown('<div class="section-title">Disease Patterns by Age Group (By Year)</div>', unsafe_allow_html=True)
+    st.caption("Descriptive analytics: frequencies, counts, and proportional morbidity broken down by year.")
 
-    top_diseases_list = disease_series.head(15).index.tolist()
+    # Heatmap broken down by Year
+    st.markdown('<div class="sub-title">Heatmap: Age Group vs Disease (Faceted by Year)</div>', unsafe_allow_html=True)
+    top_diseases_list = disease_series.head(10).index.tolist()
     matrix = (
         filtered[filtered["Disease"].isin(top_diseases_list)]
-        .groupby(["Disease", "Age Group"], observed=True)["Cases"]
+        .groupby(["Disease", "Age Group", "Year"], observed=True)["Cases"]
         .sum().unstack(fill_value=0).reindex(columns=AGE_ORDER, fill_value=0)
     )
     if not matrix.empty:
-        fig_heat = px.imshow(matrix, aspect="auto", text_auto=True, template="plotly_white", color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]])
-        fig_heat.update_layout(height=620, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Age Group", yaxis_title="")
-        st.plotly_chart(fig_heat, use_container_width=True)
+        # We reset index to use facet_col in plotly express
+        matrix_reset = matrix.reset_index()
+        # Melt for imshow is tricky with facets, so we use grouped bar for age x disease by year instead
+        # Or we can show 3 separate heatmaps
+        tab_heat_24, tab_heat_25, tab_heat_26 = st.tabs(["2024", "2025", "2026"])
+        
+        with tab_heat_24:
+            df24 = matrix_reset[matrix_reset["Year"] == "2024"].set_index("Disease").drop(columns=["Year"], errors="ignore")
+            if not df24.empty:
+                fig_h24 = px.imshow(df24, aspect="auto", text_auto=True, template="plotly_white", color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]])
+                fig_h24.update_layout(height=400, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Age Group", yaxis_title="")
+                st.plotly_chart(fig_h24, use_container_width=True)
+                
+        with tab_heat_25:
+            df25 = matrix_reset[matrix_reset["Year"] == "2025"].set_index("Disease").drop(columns=["Year"], errors="ignore")
+            if not df25.empty:
+                fig_h25 = px.imshow(df25, aspect="auto", text_auto=True, template="plotly_white", color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]])
+                fig_h25.update_layout(height=400, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Age Group", yaxis_title="")
+                st.plotly_chart(fig_h25, use_container_width=True)
+                
+        with tab_heat_26:
+            df26 = matrix_reset[matrix_reset["Year"] == "2026"].set_index("Disease").drop(columns=["Year"], errors="ignore")
+            if not df26.empty:
+                fig_h26 = px.imshow(df26, aspect="auto", text_auto=True, template="plotly_white", color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]])
+                fig_h26.update_layout(height=400, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Age Group", yaxis_title="")
+                st.plotly_chart(fig_h26, use_container_width=True)
 
-    st.markdown('<div class="sub-title">Proportional Morbidity by Age Group</div>', unsafe_allow_html=True)
-    age_table = age_series.reset_index()
-    age_table.columns = ["Age Group", "Cases"]
-    age_table["Proportional Morbidity (%)"] = ((age_table["Cases"] / total_cases * 100).round(2) if total_cases else 0.0)
-    age_table["Rank"] = range(1, len(age_table) + 1)
-    st.dataframe(age_table[["Rank", "Age Group", "Cases", "Proportional Morbidity (%)"]], use_container_width=True, hide_index=True)
-
-    st.markdown('<div class="sub-title">Age Concentration of Top Diseases</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">Age Concentration of Top Diseases (By Year)</div>', unsafe_allow_html=True)
     concentration = []
-    for disease in disease_series.head(15).index:
-        sub = filtered[filtered["Disease"] == disease]
-        a = sub.groupby("Age Group", observed=True)["Cases"].sum()
-        if a.sum() == 0: continue
-        concentration.append({
-            "Disease": disease, "Most Frequent Age Group": a.idxmax(), 
-            "Cases in That Group": int(a.max()), "Total Cases": int(a.sum()), 
-            "Proportional Share (%)": round(a.max() / a.sum() * 100, 1),
-        })
+    for disease in disease_series.head(10).index:
+        for year in ["2024", "2025", "2026"]:
+            sub = filtered[(filtered["Disease"] == disease) & (filtered["Year"] == year)]
+            a = sub.groupby("Age Group", observed=True)["Cases"].sum()
+            if a.sum() > 0:
+                concentration.append({
+                    "Disease": disease, "Year": year, "Most Frequent Age Group": a.idxmax(), 
+                    "Cases in That Group": int(a.max()), "Total Cases": int(a.sum()), 
+                    "Proportional Share (%)": round(a.max() / a.sum() * 100, 1),
+                })
     st.dataframe(pd.DataFrame(concentration), use_container_width=True, hide_index=True)
 
 
 with tab_sex:
-    st.markdown('<div class="section-title">Disease Patterns by Sex</div>', unsafe_allow_html=True)
-    st.caption("Descriptive analytics: proportional morbidity by disease and sex.")
+    st.markdown('<div class="section-title">Disease Patterns by Sex (By Year)</div>', unsafe_allow_html=True)
+    st.caption("Descriptive analytics: proportional morbidity by disease and sex, broken down by year.")
 
     sex_year_df = filtered.groupby(["Disease", "Sex", "Year"], observed=True)["Cases"].sum().reset_index()
-    top_sex_diseases = disease_series.head(10).index.tolist()
+    top_sex_diseases = disease_series.head(8).index.tolist()
     sex_year_df = sex_year_df[sex_year_df["Disease"].isin(top_sex_diseases)]
 
     fig_sex_bar = px.bar(
@@ -416,21 +435,10 @@ with tab_sex:
     )
     st.plotly_chart(fig_sex_bar, use_container_width=True)
 
-    st.markdown('<div class="sub-title">Proportional Morbidity by Sex (All Years)</div>', unsafe_allow_html=True)
-    sex_pivot = filtered.groupby(["Disease", "Sex"], observed=True)["Cases"].sum().unstack(fill_value=0)
-    for col in ("Male", "Female"):
-        if col not in sex_pivot.columns: sex_pivot[col] = 0
-    sex_pivot["Total"] = sex_pivot["Male"] + sex_pivot["Female"]
-    sex_pivot["Male Share (%)"] = (sex_pivot["Male"] / sex_pivot["Total"].replace(0, np.nan) * 100).round(1)
-    sex_pivot["Female Share (%)"] = (sex_pivot["Female"] / sex_pivot["Total"].replace(0, np.nan) * 100).round(1)
-    
-    pred_display = (sex_pivot.reset_index().sort_values("Total", ascending=False).head(15)[["Disease", "Male", "Female", "Total", "Male Share (%)", "Female Share (%)"]])
-    st.dataframe(pred_display, use_container_width=True, hide_index=True)
-
 
 with tab_time:
     st.markdown('<div class="section-title">Disease Patterns Across Time</div>', unsafe_allow_html=True)
-    st.caption("Time Series Analysis: trend and year-over-year morbidity cases.")
+    st.caption("Time Series Analysis: trend and year-over-year morbidity cases for the top diseases.")
 
     year_filtered = filtered.dropna(subset=["Year"]).copy()
     
@@ -465,7 +473,6 @@ with tab_time:
             
             colors = [PALETTE["purple"], PALETTE["yellow"], PALETTE["purple_light"], PALETTE["yellow_dark"], "#3E0A5C", "#FFE066", "#B39DDB", "#8D6E63"]
             
-            # Create a tab or columns for each year
             tab_24, tab_25, tab_26 = st.tabs(["2024 Monthly Trends", "2025 Monthly Trends", "2026 Monthly Trends"])
             
             with tab_24:
@@ -506,30 +513,32 @@ with tab_time:
 
 
 with tab_rel:
-    st.markdown('<div class="section-title">Relationship Between Variables</div>', unsafe_allow_html=True)
-    st.caption("Descriptive analysis of how disease type, age group, sex, and reporting period co-occur in the morbidity records.")
+    st.markdown('<div class="section-title">Relationship Between Variables (By Year)</div>', unsafe_allow_html=True)
+    st.caption("Descriptive analysis of how disease type, age group, sex, and reporting period co-occur, broken down by year.")
 
     top12 = disease_series.head(12).index.tolist()
 
-    st.markdown('<div class="sub-title">Disease x Age Group (Top 12 Diseases)</div>', unsafe_allow_html=True)
-    ct_da = (filtered[filtered["Disease"].isin(top12)].groupby(["Disease", "Age Group"], observed=True)["Cases"].sum().unstack(fill_value=0).reindex(columns=AGE_ORDER, fill_value=0))
-    fig_ct = px.imshow(ct_da, aspect="auto", text_auto=True, template="plotly_white", color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]])
-    fig_ct.update_layout(height=500, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Age Group", yaxis_title="")
+    st.markdown('<div class="sub-title">Disease x Age Group (Faceted by Year)</div>', unsafe_allow_html=True)
+    ct_da = (filtered[filtered["Disease"].isin(top12)].groupby(["Disease", "Age Group", "Year"], observed=True)["Cases"].sum().reset_index())
+    
+    fig_ct = px.density_heatmap(
+        ct_da, x="Age Group", y="Disease", z="Cases", facet_col="Year", 
+        facet_col_wrap=1, text_auto=True, template="plotly_white",
+        color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]]
+    )
+    fig_ct.update_layout(height=800, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Age Group", yaxis_title="")
     st.plotly_chart(fig_ct, use_container_width=True)
 
-    st.markdown('<div class="sub-title">Disease x Sex (Top 12 Diseases)</div>', unsafe_allow_html=True)
-    ct_ds = (filtered[filtered["Disease"].isin(top12)].groupby(["Disease", "Sex"], observed=True)["Cases"].sum().unstack(fill_value=0))
-    for col in ("Male", "Female"):
-        if col not in ct_ds.columns: ct_ds[col] = 0
-    fig_ct_ds = px.imshow(ct_ds, aspect="auto", text_auto=True, template="plotly_white", color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]])
-    fig_ct_ds.update_layout(height=500, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Sex", yaxis_title="")
+    st.markdown('<div class="sub-title">Disease x Sex (Faceted by Year)</div>', unsafe_allow_html=True)
+    ct_ds = (filtered[filtered["Disease"].isin(top12)].groupby(["Disease", "Sex", "Year"], observed=True)["Cases"].sum().reset_index())
+    
+    fig_ct_ds = px.density_heatmap(
+        ct_ds, x="Sex", y="Disease", z="Cases", facet_col="Year", 
+        facet_col_wrap=1, text_auto=True, template="plotly_white",
+        color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]]
+    )
+    fig_ct_ds.update_layout(height=800, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Sex", yaxis_title="")
     st.plotly_chart(fig_ct_ds, use_container_width=True)
-
-    st.markdown('<div class="sub-title">Disease x Year (Top 12 Diseases)</div>', unsafe_allow_html=True)
-    ct_dy = (filtered[filtered["Disease"].isin(top12)].groupby(["Disease", "Year"], observed=True)["Cases"].sum().unstack(fill_value=0))
-    fig_ct_dy = px.imshow(ct_dy, aspect="auto", text_auto=True, template="plotly_white", color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]])
-    fig_ct_dy.update_layout(height=500, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Year", yaxis_title="")
-    st.plotly_chart(fig_ct_dy, use_container_width=True)
 
 
 with tab_forecast:
@@ -602,11 +611,11 @@ with tab_dss:
     priority_disease["Priority Rank"] = range(1, len(priority_disease) + 1)
     st.dataframe(priority_disease[["Priority Rank", "Disease", "Cases", "Share (%)"]], use_container_width=True, hide_index=True)
 
-    st.markdown('<div class="sub-title">Priority Age Groups</div>', unsafe_allow_html=True)
-    priority_age = age_series.head(5).reset_index()
-    priority_age.columns = ["Age Group", "Cases"]
-    priority_age["Share (%)"] = (priority_age["Cases"] / total_cases * 100).round(2)
-    st.dataframe(priority_age, use_container_width=True, hide_index=True)
+    st.markdown('<div class="sub-title">Priority Age Groups (By Year)</div>', unsafe_allow_html=True)
+    # Updated to show priority age groups by year
+    priority_age_year = filtered.groupby(["Age Group", "Year"], observed=True)["Cases"].sum().reset_index()
+    priority_age_year["Share (%)"] = (priority_age_year["Cases"] / total_cases * 100).round(2)
+    st.dataframe(priority_age_year.sort_values(by=["Year", "Cases"], ascending=[True, False]), use_container_width=True, hide_index=True)
 
     st.markdown('<div class="sub-title">Resource Allocation Guidance</div>', unsafe_allow_html=True)
     high_load = disease_series.head(5)
