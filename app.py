@@ -365,41 +365,21 @@ with tab_age:
     st.markdown('<div class="section-title">Disease Patterns by Age Group (By Year)</div>', unsafe_allow_html=True)
     st.caption("Descriptive analytics: frequencies, counts, and proportional morbidity broken down by year.")
 
-    # Heatmap broken down by Year
     st.markdown('<div class="sub-title">Heatmap: Age Group vs Disease (Faceted by Year)</div>', unsafe_allow_html=True)
     top_diseases_list = disease_series.head(10).index.tolist()
-    matrix = (
-        filtered[filtered["Disease"].isin(top_diseases_list)]
-        .groupby(["Disease", "Age Group", "Year"], observed=True)["Cases"]
-        .sum().unstack(fill_value=0).reindex(columns=AGE_ORDER, fill_value=0)
-    )
-    if not matrix.empty:
-        # We reset index to use facet_col in plotly express
-        matrix_reset = matrix.reset_index()
-        # Melt for imshow is tricky with facets, so we use grouped bar for age x disease by year instead
-        # Or we can show 3 separate heatmaps
-        tab_heat_24, tab_heat_25, tab_heat_26 = st.tabs(["2024", "2025", "2026"])
-        
-        with tab_heat_24:
-            df24 = matrix_reset[matrix_reset["Year"] == "2024"].set_index("Disease").drop(columns=["Year"], errors="ignore")
-            if not df24.empty:
-                fig_h24 = px.imshow(df24, aspect="auto", text_auto=True, template="plotly_white", color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]])
-                fig_h24.update_layout(height=400, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Age Group", yaxis_title="")
-                st.plotly_chart(fig_h24, use_container_width=True)
-                
-        with tab_heat_25:
-            df25 = matrix_reset[matrix_reset["Year"] == "2025"].set_index("Disease").drop(columns=["Year"], errors="ignore")
-            if not df25.empty:
-                fig_h25 = px.imshow(df25, aspect="auto", text_auto=True, template="plotly_white", color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]])
-                fig_h25.update_layout(height=400, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Age Group", yaxis_title="")
-                st.plotly_chart(fig_h25, use_container_width=True)
-                
-        with tab_heat_26:
-            df26 = matrix_reset[matrix_reset["Year"] == "2026"].set_index("Disease").drop(columns=["Year"], errors="ignore")
-            if not df26.empty:
-                fig_h26 = px.imshow(df26, aspect="auto", text_auto=True, template="plotly_white", color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]])
-                fig_h26.update_layout(height=400, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Age Group", yaxis_title="")
-                st.plotly_chart(fig_h26, use_container_width=True)
+    
+    # FIX: Group by Year, Disease, and Age Group directly without complex pivoting
+    matrix_data = filtered[filtered["Disease"].isin(top_diseases_list)].groupby(["Year", "Disease", "Age Group"], observed=True)["Cases"].sum().reset_index()
+    
+    if not matrix_data.empty:
+        fig_heat = px.density_heatmap(
+            matrix_data, x="Age Group", y="Disease", z="Cases", facet_col="Year", 
+            facet_col_wrap=1, text_auto=True, template="plotly_white",
+            color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]],
+            category_orders={"Age Group": AGE_ORDER}
+        )
+        fig_heat.update_layout(height=1000, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Age Group", yaxis_title="")
+        st.plotly_chart(fig_heat, use_container_width=True)
 
     st.markdown('<div class="sub-title">Age Concentration of Top Diseases (By Year)</div>', unsafe_allow_html=True)
     concentration = []
@@ -445,7 +425,6 @@ with tab_time:
     if year_filtered.empty:
         st.info("No year data is available. Please ensure your file names contain a 4-digit year (e.g., 2024).")
     else:
-        # --- 1. YEARLY OVERVIEW ---
         st.markdown('<div class="sub-title">Total Cases by Year</div>', unsafe_allow_html=True)
         yearly_totals = year_filtered.groupby("Year", observed=True)["Cases"].sum().reset_index().sort_values("Year")
         
@@ -461,7 +440,6 @@ with tab_time:
             yoy["Change (%)"] = (yoy["Cases"].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0) * 100).round(2)
             st.dataframe(yoy, use_container_width=True, hide_index=True)
 
-        # --- 2. MONTHLY TRENDS BROKEN DOWN BY YEAR ---
         st.markdown('<div class="sub-title">Monthly Trends of Top Diseases (Broken Down by Year)</div>', unsafe_allow_html=True)
         monthly = filtered[filtered["Period Type"] == "Monthly"]
         
@@ -499,7 +477,6 @@ with tab_time:
                     fig26.update_layout(height=450, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Month", yaxis_title="Cases", legend_title="")
                     st.plotly_chart(fig26, use_container_width=True)
 
-        # --- 3. YEARLY TRENDS OF TOP DISEASES ---
         st.markdown('<div class="sub-title">Overall Yearly Trends of Top Diseases</div>', unsafe_allow_html=True)
         trend_data_yearly = year_filtered[year_filtered["Disease"].isin(top8)].groupby(["Year", "Disease"], observed=True)["Cases"].sum().reset_index().sort_values("Year")
         
@@ -524,9 +501,10 @@ with tab_rel:
     fig_ct = px.density_heatmap(
         ct_da, x="Age Group", y="Disease", z="Cases", facet_col="Year", 
         facet_col_wrap=1, text_auto=True, template="plotly_white",
-        color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]]
+        color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]],
+        category_orders={"Age Group": AGE_ORDER}
     )
-    fig_ct.update_layout(height=800, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Age Group", yaxis_title="")
+    fig_ct.update_layout(height=1000, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Age Group", yaxis_title="")
     st.plotly_chart(fig_ct, use_container_width=True)
 
     st.markdown('<div class="sub-title">Disease x Sex (Faceted by Year)</div>', unsafe_allow_html=True)
@@ -537,7 +515,7 @@ with tab_rel:
         facet_col_wrap=1, text_auto=True, template="plotly_white",
         color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]]
     )
-    fig_ct_ds.update_layout(height=800, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Sex", yaxis_title="")
+    fig_ct_ds.update_layout(height=1000, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Sex", yaxis_title="")
     st.plotly_chart(fig_ct_ds, use_container_width=True)
 
 
@@ -612,7 +590,6 @@ with tab_dss:
     st.dataframe(priority_disease[["Priority Rank", "Disease", "Cases", "Share (%)"]], use_container_width=True, hide_index=True)
 
     st.markdown('<div class="sub-title">Priority Age Groups (By Year)</div>', unsafe_allow_html=True)
-    # Updated to show priority age groups by year
     priority_age_year = filtered.groupby(["Age Group", "Year"], observed=True)["Cases"].sum().reset_index()
     priority_age_year["Share (%)"] = (priority_age_year["Cases"] / total_cases * 100).round(2)
     st.dataframe(priority_age_year.sort_values(by=["Year", "Cases"], ascending=[True, False]), use_container_width=True, hide_index=True)
