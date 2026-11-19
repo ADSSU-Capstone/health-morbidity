@@ -113,7 +113,8 @@ def evaluate_forecast(actual: np.ndarray, predicted: np.ndarray) -> dict:
     actual = np.asarray(actual, dtype=float)
     predicted = np.asarray(predicted, dtype=float)
     n = len(actual)
-    if n == 0: return {"MAE": 0.0, "MSE": 0.0, "RMSE": 0.0, "MAPE": 0.0}
+    if n == 0:
+        return {"MAE": 0.0, "MSE": 0.0, "RMSE": 0.0, "MAPE": 0.0}
     err = actual - predicted
     mae = float(np.mean(np.abs(err)))
     mse = float(np.mean(err ** 2))
@@ -125,8 +126,10 @@ def evaluate_forecast(actual: np.ndarray, predicted: np.ndarray) -> dict:
 
 def descriptive_trend_forecast(series: pd.Series, steps: int = 3) -> np.ndarray:
     y = np.asarray(series, dtype=float)
-    if len(y) == 0: return np.zeros(steps)
-    if len(y) == 1: return np.full(steps, y[0])
+    if len(y) == 0:
+        return np.zeros(steps)
+    if len(y) == 1:
+        return np.full(steps, y[0])
     x = np.arange(len(y))
     coeffs = np.polyfit(x, y, 1)
     future_x = np.arange(len(y), len(y) + steps)
@@ -134,7 +137,8 @@ def descriptive_trend_forecast(series: pd.Series, steps: int = 3) -> np.ndarray:
 
 
 def fit_arima_forecast(series: pd.Series, steps: int = 3) -> Optional[np.ndarray]:
-    if not STATSMODELS_AVAILABLE: return None
+    if not STATSMODELS_AVAILABLE:
+        return None
     try:
         model = ARIMA(series.astype(float), order=(1, 1, 1))
         fit = model.fit()
@@ -144,16 +148,22 @@ def fit_arima_forecast(series: pd.Series, steps: int = 3) -> Optional[np.ndarray
         return None
 
 
-def fit_prophet_forecast(series: pd.Series, steps: int = 3) -> Optional[np.ndarray]:
-    if not PROPHET_AVAILABLE: return None
+def fit_prophet_forecast(
+    series: pd.Series,
+    steps: int = 3,
+    freq: str = "MS",          # "MS" = month start, "YS" = year start
+    start: str = "2024-01-01", # arbitrary origin; only spacing matters
+) -> Optional[np.ndarray]:
+    if not PROPHET_AVAILABLE:
+        return None
     try:
         df = pd.DataFrame({
-            "ds": pd.date_range(start="2024-01-01", periods=len(series), freq="MS"),
+            "ds": pd.date_range(start=start, periods=len(series), freq=freq),
             "y": series.astype(float).values,
         })
         m = Prophet()
         m.fit(df)
-        future = m.make_future_dataframe(periods=steps, freq="MS")
+        future = m.make_future_dataframe(periods=steps, freq=freq)
         fc = m.predict(future)
         return np.maximum(np.asarray(fc["yhat"].tail(steps).values, dtype=float), 0)
     except Exception:
@@ -171,7 +181,8 @@ PLACEHOLDER_LETTERS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
 
 def clean_placeholder_rows(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty or "Disease" not in df.columns: return df
+    if df.empty or "Disease" not in df.columns:
+        return df
     disease = df["Disease"].astype(str).str.strip()
     keep = ~disease.isin(PLACEHOLDER_DISEASES)
     keep &= ~disease.str.upper().isin(PLACEHOLDER_LETTERS)
@@ -192,7 +203,8 @@ def load_clean_data(file_bytes_list: tuple, filenames: tuple):
             year_match = re.search(r'20\d{2}', name)
             df["Year"] = year_match.group(0) if year_match else None
             frames.append(df)
-    if not frames: return pd.DataFrame()
+    if not frames:
+        return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
 
 
@@ -238,7 +250,8 @@ with st.sidebar:
     source_files = sorted(long_df["Source File"].unique().tolist()) if "Source File" in long_df.columns else []
     if len(source_files) > 1:
         selected_sources = st.multiselect("Source file", source_files, default=source_files, help="Include records from one or more uploaded workbooks.")
-        if selected_sources: long_df = long_df[long_df["Source File"].isin(selected_sources)]
+        if selected_sources:
+            long_df = long_df[long_df["Source File"].isin(selected_sources)]
 
     period_options = sorted(long_df["Period"].dropna().unique().tolist())
     periods = st.multiselect("Period", period_options, default=period_options)
@@ -249,10 +262,14 @@ with st.sidebar:
     sexes = st.multiselect("Sex", ["Male", "Female"], default=["Male", "Female"])
 
 filtered = long_df.copy()
-if periods: filtered = filtered[filtered["Period"].isin(periods)]
-if diseases: filtered = filtered[filtered["Disease"].isin(diseases)]
-if age_groups: filtered = filtered[filtered["Age Group"].astype(str).isin(age_groups)]
-if sexes: filtered = filtered[filtered["Sex"].isin(sexes)]
+if periods:
+    filtered = filtered[filtered["Period"].isin(periods)]
+if diseases:
+    filtered = filtered[filtered["Disease"].isin(diseases)]
+if age_groups:
+    filtered = filtered[filtered["Age Group"].astype(str).isin(age_groups)]
+if sexes:
+    filtered = filtered[filtered["Sex"].isin(sexes)]
 
 if filtered.empty:
     st.warning("No records match the current filters.")
@@ -302,18 +319,23 @@ top10_share = round(disease_series.head(10).sum() / total_cases * 100, 1) if tot
 
 with tab_overview:
     c1, c2, c3, c4, c5 = st.columns(5)
-    with c1: st.markdown(kpi_card("Total Cases", f"{total_cases:,}", "Filtered records"), unsafe_allow_html=True)
-    with c2: st.markdown(kpi_card("Unique Diseases", f"{unique_diseases:,}", "Distinct diagnoses"), unsafe_allow_html=True)
-    with c3: st.markdown(kpi_card("Top Disease", top_disease, f"{top_disease_cases:,} cases"), unsafe_allow_html=True)
-    with c4: st.markdown(kpi_card("Top Age Group", top_age, f"{top_age_cases:,} cases"), unsafe_allow_html=True)
-    with c5: st.markdown(kpi_card("Peak Period", str(peak_period), f"{peak_period_cases:,} cases"), unsafe_allow_html=True)
+    with c1:
+        st.markdown(kpi_card("Total Cases", f"{total_cases:,}", "Filtered records"), unsafe_allow_html=True)
+    with c2:
+        st.markdown(kpi_card("Unique Diseases", f"{unique_diseases:,}", "Distinct diagnoses"), unsafe_allow_html=True)
+    with c3:
+        st.markdown(kpi_card("Top Disease", top_disease, f"{top_disease_cases:,} cases"), unsafe_allow_html=True)
+    with c4:
+        st.markdown(kpi_card("Top Age Group", top_age, f"{top_age_cases:,} cases"), unsafe_allow_html=True)
+    with c5:
+        st.markdown(kpi_card("Peak Period", str(peak_period), f"{peak_period_cases:,} cases"), unsafe_allow_html=True)
 
     st.markdown('<div class="section-title">Top 10 Diseases by Caseload (By Year)</div>', unsafe_allow_html=True)
     top10_year = filtered[filtered["Disease"].isin(disease_series.head(10).index)].groupby(["Disease", "Year"], observed=True)["Cases"].sum().reset_index()
     top10_year = top10_year.sort_values(by=["Year", "Cases"], ascending=[True, False])
-    
+
     fig_top10 = px.bar(
-        top10_year, x="Cases", y="Disease", color="Year", orientation="h", 
+        top10_year, x="Cases", y="Disease", color="Year", orientation="h",
         barmode="group", text_auto=True, template="plotly_white",
         color_discrete_sequence=[PALETTE["purple"], PALETTE["yellow"], PALETTE["purple_light"]]
     )
@@ -325,17 +347,17 @@ with tab_overview:
         st.markdown('<div class="section-title">Sex Distribution (By Year)</div>', unsafe_allow_html=True)
         sex_df = filtered.groupby(["Sex", "Year"], observed=True)["Cases"].sum().reset_index()
         fig_sex = px.bar(
-            sex_df, x="Sex", y="Cases", color="Year", barmode="group", text_auto=True, 
+            sex_df, x="Sex", y="Cases", color="Year", barmode="group", text_auto=True,
             template="plotly_white", color_discrete_sequence=[PALETTE["purple"], PALETTE["yellow"], PALETTE["purple_light"]]
         )
         fig_sex.update_layout(height=380, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="", yaxis_title="Cases", legend_title="Year")
         st.plotly_chart(fig_sex, use_container_width=True)
-        
+
     with col2:
         st.markdown('<div class="section-title">Cases by Age Group (By Year)</div>', unsafe_allow_html=True)
         age_year_df = filtered.groupby(["Age Group", "Year"], observed=True)["Cases"].sum().reset_index()
         age_year_df = age_year_df.sort_values(by=["Year", "Age Group"])
-        
+
         fig_age = px.bar(
             age_year_df, x="Age Group", y="Cases", color="Year", barmode="group",
             text_auto=True, template="plotly_white",
@@ -367,13 +389,12 @@ with tab_age:
 
     st.markdown('<div class="sub-title">Heatmap: Age Group vs Disease (Faceted by Year)</div>', unsafe_allow_html=True)
     top_diseases_list = disease_series.head(10).index.tolist()
-    
-    # FIX: Group by Year, Disease, and Age Group directly without complex pivoting
+
     matrix_data = filtered[filtered["Disease"].isin(top_diseases_list)].groupby(["Year", "Disease", "Age Group"], observed=True)["Cases"].sum().reset_index()
-    
+
     if not matrix_data.empty:
         fig_heat = px.density_heatmap(
-            matrix_data, x="Age Group", y="Disease", z="Cases", facet_col="Year", 
+            matrix_data, x="Age Group", y="Disease", z="Cases", facet_col="Year",
             facet_col_wrap=1, text_auto=True, template="plotly_white",
             color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]],
             category_orders={"Age Group": AGE_ORDER}
@@ -389,8 +410,8 @@ with tab_age:
             a = sub.groupby("Age Group", observed=True)["Cases"].sum()
             if a.sum() > 0:
                 concentration.append({
-                    "Disease": disease, "Year": year, "Most Frequent Age Group": a.idxmax(), 
-                    "Cases in That Group": int(a.max()), "Total Cases": int(a.sum()), 
+                    "Disease": disease, "Year": year, "Most Frequent Age Group": a.idxmax(),
+                    "Cases in That Group": int(a.max()), "Total Cases": int(a.sum()),
                     "Proportional Share (%)": round(a.max() / a.sum() * 100, 1),
                 })
     st.dataframe(pd.DataFrame(concentration), use_container_width=True, hide_index=True)
@@ -410,7 +431,7 @@ with tab_sex:
         color_discrete_sequence=[PALETTE["purple"], PALETTE["yellow"], PALETTE["purple_light"]]
     )
     fig_sex_bar.update_layout(
-        height=460, margin=dict(l=10, r=10, t=10, b=10), 
+        height=460, margin=dict(l=10, r=10, t=10, b=10),
         xaxis_title="", yaxis_title="Cases", xaxis_tickangle=-40, legend_title="Year"
     )
     st.plotly_chart(fig_sex_bar, use_container_width=True)
@@ -421,18 +442,18 @@ with tab_time:
     st.caption("Time Series Analysis: trend and year-over-year morbidity cases for the top diseases.")
 
     year_filtered = filtered.dropna(subset=["Year"]).copy()
-    
+
     if year_filtered.empty:
         st.info("No year data is available. Please ensure your file names contain a 4-digit year (e.g., 2024).")
     else:
         st.markdown('<div class="sub-title">Total Cases by Year</div>', unsafe_allow_html=True)
         yearly_totals = year_filtered.groupby("Year", observed=True)["Cases"].sum().reset_index().sort_values("Year")
-        
+
         col_y1, col_y2 = st.columns(2)
         with col_y1:
             fig_year_line = px.line(yearly_totals, x="Year", y="Cases", markers=True, template="plotly_white", color_discrete_sequence=[PALETTE["purple"]])
             fig_year_line.update_layout(height=380, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Year", yaxis_title="Total Cases")
-            fig_year_line.update_xaxes(type='category') 
+            fig_year_line.update_xaxes(type='category')
             st.plotly_chart(fig_year_line, use_container_width=True)
         with col_y2:
             yoy = yearly_totals.copy()
@@ -442,20 +463,21 @@ with tab_time:
 
         st.markdown('<div class="sub-title">Monthly Trends of Top Diseases (Broken Down by Year)</div>', unsafe_allow_html=True)
         monthly = filtered[filtered["Period Type"] == "Monthly"]
-        
+
         if monthly.empty:
             st.info("Monthly data is not available under the current filters.")
         else:
             top8 = disease_series.head(8).index.tolist()
             trend_data = monthly[monthly["Disease"].isin(top8)].groupby(["Year", "Period Order", "Period", "Disease"], observed=True)["Cases"].sum().reset_index().sort_values("Period Order")
-            
+
             colors = [PALETTE["purple"], PALETTE["yellow"], PALETTE["purple_light"], PALETTE["yellow_dark"], "#3E0A5C", "#FFE066", "#B39DDB", "#8D6E63"]
-            
+
             tab_24, tab_25, tab_26 = st.tabs(["2024 Monthly Trends", "2025 Monthly Trends", "2026 Monthly Trends"])
-            
+
             with tab_24:
                 df24 = trend_data[trend_data["Year"] == "2024"]
-                if df24.empty: st.info("No monthly data for 2024.")
+                if df24.empty:
+                    st.info("No monthly data for 2024.")
                 else:
                     fig24 = px.line(df24, x="Period", y="Cases", color="Disease", markers=True, template="plotly_white", color_discrete_sequence=colors)
                     fig24.update_layout(height=450, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Month", yaxis_title="Cases", legend_title="")
@@ -463,7 +485,8 @@ with tab_time:
 
             with tab_25:
                 df25 = trend_data[trend_data["Year"] == "2025"]
-                if df25.empty: st.info("No monthly data for 2025.")
+                if df25.empty:
+                    st.info("No monthly data for 2025.")
                 else:
                     fig25 = px.line(df25, x="Period", y="Cases", color="Disease", markers=True, template="plotly_white", color_discrete_sequence=colors)
                     fig25.update_layout(height=450, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Month", yaxis_title="Cases", legend_title="")
@@ -471,7 +494,8 @@ with tab_time:
 
             with tab_26:
                 df26 = trend_data[trend_data["Year"] == "2026"]
-                if df26.empty: st.info("No monthly data for 2026.")
+                if df26.empty:
+                    st.info("No monthly data for 2026.")
                 else:
                     fig26 = px.line(df26, x="Period", y="Cases", color="Disease", markers=True, template="plotly_white", color_discrete_sequence=colors)
                     fig26.update_layout(height=450, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="Month", yaxis_title="Cases", legend_title="")
@@ -479,7 +503,7 @@ with tab_time:
 
         st.markdown('<div class="sub-title">Overall Yearly Trends of Top Diseases</div>', unsafe_allow_html=True)
         trend_data_yearly = year_filtered[year_filtered["Disease"].isin(top8)].groupby(["Year", "Disease"], observed=True)["Cases"].sum().reset_index().sort_values("Year")
-        
+
         fig_multi = px.line(
             trend_data_yearly, x="Year", y="Cases", color="Disease", markers=True, template="plotly_white",
             color_discrete_sequence=colors
@@ -497,9 +521,9 @@ with tab_rel:
 
     st.markdown('<div class="sub-title">Disease x Age Group (Faceted by Year)</div>', unsafe_allow_html=True)
     ct_da = (filtered[filtered["Disease"].isin(top12)].groupby(["Disease", "Age Group", "Year"], observed=True)["Cases"].sum().reset_index())
-    
+
     fig_ct = px.density_heatmap(
-        ct_da, x="Age Group", y="Disease", z="Cases", facet_col="Year", 
+        ct_da, x="Age Group", y="Disease", z="Cases", facet_col="Year",
         facet_col_wrap=1, text_auto=True, template="plotly_white",
         color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]],
         category_orders={"Age Group": AGE_ORDER}
@@ -509,9 +533,9 @@ with tab_rel:
 
     st.markdown('<div class="sub-title">Disease x Sex (Faceted by Year)</div>', unsafe_allow_html=True)
     ct_ds = (filtered[filtered["Disease"].isin(top12)].groupby(["Disease", "Sex", "Year"], observed=True)["Cases"].sum().reset_index())
-    
+
     fig_ct_ds = px.density_heatmap(
-        ct_ds, x="Sex", y="Disease", z="Cases", facet_col="Year", 
+        ct_ds, x="Sex", y="Disease", z="Cases", facet_col="Year",
         facet_col_wrap=1, text_auto=True, template="plotly_white",
         color_continuous_scale=[[0, PALETTE["yellow_light"]], [0.5, PALETTE["yellow"]], [1, PALETTE["purple"]]]
     )
@@ -521,61 +545,188 @@ with tab_rel:
 
 with tab_forecast:
     st.markdown('<div class="section-title">Forecasted Morbidity Trends</div>', unsafe_allow_html=True)
-    st.caption("Projects future case counts from historical monthly data using predictive models.")
+    st.caption(
+        "Projects future case counts from historical data using predictive models. "
+        "Choose monthly or yearly granularity — the horizon, evaluation, and output adapt automatically."
+    )
 
-    monthly = filtered[filtered["Period Type"] == "Monthly"]
-    if monthly.empty or monthly["Period Order"].nunique() < 3:
-        st.info("At least three monthly periods are required for a stable forecast.")
+    granularity = st.radio(
+        "Forecast granularity",
+        options=["Monthly", "Yearly"],
+        index=0,
+        horizontal=True,
+        help=(
+            "Monthly uses records where Period Type = Monthly. "
+            "Yearly aggregates all cases by Year."
+        ),
+    )
+
+    # ---- Config per granularity ----
+    if granularity == "Monthly":
+        source_df = filtered[filtered["Period Type"] == "Monthly"]
+        min_points = 3
+        min_points_for_eval = 6
+        holdout = 2
+        freq = "MS"
+        horizon_max = 6
+        horizon_default = 3
+        horizon_label = "Forecast horizon (months)"
+        unit_label = "month(s)"
+        x_label = "Month"
+    else:  # Yearly
+        source_df = filtered.dropna(subset=["Year"]).copy()
+        min_points = 2
+        min_points_for_eval = 3
+        holdout = 1
+        freq = "YS"
+        horizon_max = 3
+        horizon_default = 1
+        horizon_label = "Forecast horizon (years)"
+        unit_label = "year(s)"
+        x_label = "Year"
+
+    if source_df.empty:
+        st.info(f"No {granularity.lower()} data is available under the current filters.")
     else:
-        monthly_totals = (monthly.groupby(["Period Order", "Period"], observed=True)["Cases"].sum().reset_index().sort_values("Period Order"))
-        series = monthly_totals["Cases"].reset_index(drop=True)
+        # ---- Build the time series ----
+        if granularity == "Monthly":
+            agg = (
+                source_df.groupby(["Period Order", "Period"], observed=True)["Cases"].sum()
+                .reset_index()
+                .sort_values("Period Order")
+            )
+            labels = agg["Period"].astype(str).tolist()
+        else:
+            agg = (
+                source_df.groupby("Year", observed=True)["Cases"].sum()
+                .reset_index()
+                .sort_values("Year")
+            )
+            labels = agg["Year"].astype(str).tolist()
 
-        model_choice = st.selectbox("Predictive model", options=["ARIMA", "Prophet", "Descriptive trend (fallback)"], index=0)
+        series = agg["Cases"].reset_index(drop=True)
 
-        if model_choice == "ARIMA" and not STATSMODELS_AVAILABLE:
-            st.warning("statsmodels is not installed; falling back to the descriptive trend.")
-            model_choice = "Descriptive trend (fallback)"
-        if model_choice == "Prophet" and not PROPHET_AVAILABLE:
-            st.warning("prophet is not installed; falling back to the descriptive trend.")
-            model_choice = "Descriptive trend (fallback)"
+        if len(series) < min_points:
+            st.info(
+                f"At least {min_points} {granularity.lower()} periods are required to produce a forecast. "
+                f"Currently {len(series)} are available."
+            )
+        else:
+            model_choice = st.selectbox(
+                "Predictive model",
+                options=["ARIMA", "Prophet", "Descriptive trend (fallback)"],
+                index=0,
+            )
 
-        if len(series) >= 6:
-            train = series.iloc[:-2]
-            test = series.iloc[-2:].reset_index(drop=True)
-            if model_choice == "ARIMA": pred_test = fit_arima_forecast(train, steps=len(test))
-            elif model_choice == "Prophet": pred_test = fit_prophet_forecast(train, steps=len(test))
-            else: pred_test = descriptive_trend_forecast(train, steps=len(test))
-            if pred_test is None: pred_test = descriptive_trend_forecast(train, steps=len(test))
-            metrics = evaluate_forecast(test.values, pred_test)
+            if model_choice == "ARIMA" and not STATSMODELS_AVAILABLE:
+                st.warning("statsmodels is not installed; falling back to the descriptive trend.")
+                model_choice = "Descriptive trend (fallback)"
+            if model_choice == "Prophet" and not PROPHET_AVAILABLE:
+                st.warning("prophet is not installed; falling back to the descriptive trend.")
+                model_choice = "Descriptive trend (fallback)"
 
-            st.markdown('<div class="sub-title">Model Evaluation (hold-out tail)</div>', unsafe_allow_html=True)
-            m1, m2, m3, m4 = st.columns(4)
-            with m1: st.markdown(kpi_card("MAE", f"{metrics['MAE']:,}", "Mean Absolute Error"), unsafe_allow_html=True)
-            with m2: st.markdown(kpi_card("MSE", f"{metrics['MSE']:,}", "Mean Squared Error"), unsafe_allow_html=True)
-            with m3: st.markdown(kpi_card("RMSE", f"{metrics['RMSE']:,}", "Root Mean Squared Error"), unsafe_allow_html=True)
-            with m4: st.markdown(kpi_card("MAPE", f"{metrics['MAPE']:,}%", "Mean Absolute Percentage Error"), unsafe_allow_html=True)
+            # ---- Hold-out evaluation ----
+            if len(series) >= min_points_for_eval:
+                train = series.iloc[:-holdout]
+                test = series.iloc[-holdout:].reset_index(drop=True)
 
-        horizon = st.slider("Forecast horizon (months)", min_value=1, max_value=6, value=3)
+                if model_choice == "ARIMA":
+                    pred_test = fit_arima_forecast(train, steps=len(test))
+                elif model_choice == "Prophet":
+                    pred_test = fit_prophet_forecast(train, steps=len(test), freq=freq)
+                else:
+                    pred_test = descriptive_trend_forecast(train, steps=len(test))
 
-        if model_choice == "ARIMA": forecast_values = fit_arima_forecast(series, steps=horizon)
-        elif model_choice == "Prophet": forecast_values = fit_prophet_forecast(series, steps=horizon)
-        else: forecast_values = None
-        if forecast_values is None:
-            forecast_values = descriptive_trend_forecast(series, steps=horizon)
-            if model_choice != "Descriptive trend (fallback)":
-                st.info("The selected model could not be fitted; showing the descriptive trend.")
+                if pred_test is None:
+                    pred_test = descriptive_trend_forecast(train, steps=len(test))
 
-        future_labels = [f"Forecast {i}" for i in range(1, horizon + 1)]
-        hist_df = pd.DataFrame({"Period": monthly_totals["Period"], "Cases": monthly_totals["Cases"], "Type": "Historical"})
-        fc_df = pd.DataFrame({"Period": future_labels, "Cases": forecast_values.round(0).astype(int), "Type": "Forecast"})
-        combined = pd.concat([hist_df, fc_df], ignore_index=True)
+                metrics = evaluate_forecast(test.values, pred_test)
 
-        fig_fc = px.line(combined, x="Period", y="Cases", color="Type", markers=True, template="plotly_white", color_discrete_map={"Historical": PALETTE["purple"], "Forecast": PALETTE["yellow"]})
-        fig_fc.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10), xaxis_title="", yaxis_title="Cases", legend_title="")
-        st.plotly_chart(fig_fc, use_container_width=True)
+                st.markdown(
+                    f'<div class="sub-title">Model Evaluation '
+                    f'(hold-out last {holdout} {unit_label})</div>',
+                    unsafe_allow_html=True,
+                )
+                m1, m2, m3, m4 = st.columns(4)
+                with m1:
+                    st.markdown(kpi_card("MAE", f"{metrics['MAE']:,}", "Mean Absolute Error"), unsafe_allow_html=True)
+                with m2:
+                    st.markdown(kpi_card("MSE", f"{metrics['MSE']:,}", "Mean Squared Error"), unsafe_allow_html=True)
+                with m3:
+                    st.markdown(kpi_card("RMSE", f"{metrics['RMSE']:,}", "Root Mean Squared Error"), unsafe_allow_html=True)
+                with m4:
+                    st.markdown(kpi_card("MAPE", f"{metrics['MAPE']:,}%", "Mean Absolute Percentage Error"), unsafe_allow_html=True)
+            else:
+                st.caption(
+                    f"Not enough {granularity.lower()} periods ({len(series)}) for a hold-out evaluation; "
+                    f"at least {min_points_for_eval} are needed. The forecast will still be generated."
+                )
 
-        st.markdown('<div class="sub-title">Forecasted Monthly Totals</div>', unsafe_allow_html=True)
-        st.dataframe(fc_df.rename(columns={"Cases": "Forecasted Cases"}), use_container_width=True, hide_index=True)
+            # ---- Forecast ----
+            horizon = st.slider(
+                horizon_label,
+                min_value=1,
+                max_value=horizon_max,
+                value=horizon_default,
+            )
+
+            if model_choice == "ARIMA":
+                forecast_values = fit_arima_forecast(series, steps=horizon)
+            elif model_choice == "Prophet":
+                forecast_values = fit_prophet_forecast(series, steps=horizon, freq=freq)
+            else:
+                forecast_values = None
+
+            if forecast_values is None:
+                forecast_values = descriptive_trend_forecast(series, steps=horizon)
+                if model_choice != "Descriptive trend (fallback)":
+                    st.info("The selected model could not be fitted; showing the descriptive trend instead.")
+
+            # ---- Future labels ----
+            if granularity == "Yearly":
+                try:
+                    last_year = int(max(labels))
+                    future_labels = [str(last_year + i) for i in range(1, horizon + 1)]
+                except ValueError:
+                    future_labels = [f"Forecast {i}" for i in range(1, horizon + 1)]
+            else:
+                future_labels = [f"Forecast {i}" for i in range(1, horizon + 1)]
+
+            hist_df = pd.DataFrame({
+                "Period": labels,
+                "Cases": series.values,
+                "Type": "Historical",
+            })
+            fc_df = pd.DataFrame({
+                "Period": future_labels,
+                "Cases": forecast_values.round(0).astype(int),
+                "Type": "Forecast",
+            })
+            combined = pd.concat([hist_df, fc_df], ignore_index=True)
+
+            fig_fc = px.line(
+                combined, x="Period", y="Cases", color="Type", markers=True,
+                template="plotly_white",
+                color_discrete_map={"Historical": PALETTE["purple"], "Forecast": PALETTE["yellow"]},
+            )
+            fig_fc.update_layout(
+                height=420,
+                margin=dict(l=10, r=10, t=10, b=10),
+                xaxis_title=x_label,
+                yaxis_title="Cases",
+                legend_title="",
+            )
+            st.plotly_chart(fig_fc, use_container_width=True)
+
+            st.markdown(
+                f'<div class="sub-title">Forecasted {granularity} Totals</div>',
+                unsafe_allow_html=True,
+            )
+            st.dataframe(
+                fc_df.rename(columns={"Cases": f"Forecasted Cases ({granularity})"}),
+                use_container_width=True,
+                hide_index=True,
+            )
 
 
 with tab_dss:
@@ -627,9 +778,11 @@ with tab_dss:
     st.markdown(
         result_card(
             "Forecast Use",
-            f"Use the Forecasted Trends tab to project caseloads for the next 1 to 6 "
-            f"months. Align procurement and staffing cycles with the projected "
-            f"direction so the health facility remains within capacity."
+            f"Use the Forecasted Trends tab to project caseloads. The tab supports both "
+            f"<b>monthly</b> projections (up to 6 months ahead) for operational planning "
+            f"(procurement, staffing) and <b>yearly</b> projections (up to 3 years ahead) for "
+            f"strategic planning (annual budget, program targets). Align procurement and "
+            f"staffing cycles with the projected direction so the health facility remains within capacity."
         ), unsafe_allow_html=True
     )
 
